@@ -1,0 +1,168 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { Mail, ArrowRight, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+
+export default function ForgotPasswordPage() {
+    const [email, setEmail] = useState("");
+    const [isLoading, setIsLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState("");
+    const [isSubmitted, setIsSubmitted] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        setErrorMessage("");
+
+        if (!email.trim()) {
+            setErrorMessage("Por favor ingresa tu correo o usuario corporativo.");
+            return;
+        }
+
+        setIsLoading(true);
+
+        try {
+            const res = await fetch("/api/auth/forgot-password", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email: email.trim() }),
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => null);
+                const emailErr = data?.errors?.email;
+                const msg = (Array.isArray(emailErr) ? emailErr[0] : emailErr) || data?.message || "Ocurrió un error al procesar la solicitud.";
+                setErrorMessage(msg);
+                return;
+            }
+
+            setIsSubmitted(true);
+        } catch {
+            setErrorMessage("Error de conexión con el servidor.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="w-full max-w-md px-4 sm:px-0 py-8">
+            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-8 sm:p-10 shadow-xl shadow-neutral-950/5 dark:shadow-black/40">
+                {/* Encabezado */}
+                <div className="flex flex-col items-center text-center mb-8">
+                    <img src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
+                    <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 mt-2">
+                        Recuperar Contraseña
+                    </h1>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+                        Gestor Financiero • Pasivos y Tesorería
+                    </p>
+                </div>
+
+                {isSubmitted ? (
+                    /* Pantalla de confirmación tras enviar correo */
+                    <div className="text-center space-y-5">
+                        <div className="w-12 h-12 rounded-2xl bg-locatel-medio/10 text-locatel-medio flex items-center justify-center mx-auto">
+                            <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                        <div className="space-y-2">
+                            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+                                Correo enviado
+                            </h2>
+                            <p className="text-sm text-neutral-600 dark:text-neutral-300">
+                                Hemos enviado las instrucciones de recuperación a{" "}
+                                <span className="font-medium text-neutral-900 dark:text-neutral-100">{email}</span>.
+                            </p>
+                        </div>
+
+                        <div className="pt-2 space-y-3">
+                            <Link
+                                href="/login"
+                                className="w-full py-3 px-4 rounded-xl font-medium text-sm text-white bg-locatel-medio hover:bg-locatel-oscuro active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                                <ArrowLeft className="w-4 h-4" />
+                                Volver a iniciar sesión
+                            </Link>
+
+                            <button
+                                type="button"
+                                onClick={() => setIsSubmitted(false)}
+                                className="text-xs font-medium text-neutral-500 hover:text-locatel-medio dark:hover:text-locatel-claro transition-colors cursor-pointer"
+                            >
+                                ¿No recibiste el correo? Intentar con otra dirección
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    /* Formulario de solicitud */
+                    <>
+                        {errorMessage && (
+                            <div className="mb-6 p-3.5 rounded-xl bg-locatel-naranja/10 border border-locatel-naranja/30 text-locatel-naranja text-sm flex items-center gap-2.5">
+                                <AlertCircle className="w-5 h-5 shrink-0" />
+                                <span>{errorMessage}</span>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleSubmit} className="space-y-5">
+                            <div>
+                                <label
+                                    htmlFor="email"
+                                    className="block text-xs font-semibold uppercase tracking-wider text-neutral-700 dark:text-neutral-300 mb-1.5"
+                                >
+                                    Correo o Usuario Corporativo
+                                </label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-neutral-400 dark:text-neutral-500">
+                                        <Mail className="w-5 h-5" />
+                                    </div>
+                                    <input
+                                        type="text"
+                                        name="email"
+                                        id="email"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        placeholder="correo@locatel.com o usuario"
+                                        required
+                                        autoComplete="email"
+                                        className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 text-sm focus:outline-none focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/30 transition-all"
+                                    />
+                                </div>
+                                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
+                                    Te enviaremos un enlace seguro para restablecer tu contraseña.
+                                </p>
+                            </div>
+
+                            <button
+                                type="submit"
+                                disabled={isLoading}
+                                className="w-full py-3 px-4 rounded-xl font-medium text-sm text-white bg-locatel-medio hover:bg-locatel-oscuro active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-locatel-medio/50 disabled:opacity-70 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                                {isLoading ? (
+                                    <>
+                                        <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" />
+                                        Enviando instrucciones...
+                                    </>
+                                ) : (
+                                    <>
+                                        Enviar instrucciones
+                                        <ArrowRight className="w-4 h-4" />
+                                    </>
+                                )}
+                            </button>
+                        </form>
+
+                        {/* Volver a Login */}
+                        <div className="mt-8 pt-6 border-t border-neutral-200 dark:border-neutral-800 text-center">
+                            <Link
+                                href="/login"
+                                className="inline-flex items-center gap-2 text-sm font-semibold text-locatel-medio dark:text-locatel-claro hover:text-locatel-oscuro transition-colors"
+                            >
+                                <ArrowLeft className="w-4 h-4" />
+                                Volver a Iniciar Sesión
+                            </Link>
+                        </div>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}
