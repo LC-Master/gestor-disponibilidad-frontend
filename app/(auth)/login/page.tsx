@@ -4,24 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { User, Lock, Eye, EyeOff, Loader2, ArrowRight, AlertCircle } from "lucide-react";
-
-const loginSchema = z.object({
-    email: z.email("El correo es obligatorio"),
-    password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
-    rememberMe: z.boolean(),
-});
-
-type LoginFormData = z.infer<typeof loginSchema>;
-
-type ResponseLoginError = {
-    errors?: {
-        email?: string | string[];
-        password?: string | string[];
-    };
-    message?: string;
-};
+import { loginSchema, type LoginFormData, type ResponseLoginError } from "@/schemas/auth";
 
 export default function LoginPage() {
     const [showPassword, setShowPassword] = useState(false);
@@ -101,7 +85,7 @@ export default function LoginPage() {
                         Iniciar Sesión
                     </h1>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                        Gestor Financiero • Pasivos y Tesorería
+                        Gestor de Facturación • Pasivos y Tesorería
                     </p>
                 </div>
 

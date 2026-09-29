@@ -1,37 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { z } from "zod"
 import Link from "next/link";
 import { User, Mail, Lock, Eye, EyeOff, Loader2, ArrowRight, AlertCircle, ShieldCheck } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-
-const registerSchema = z.object({
-    name: z.string().min(1, "El nombre es requerido"),
-    lastName: z.string().min(1, "El apellido es requerido"),
-    email: z.email("El correo es requerido"),
-    password: z.string().min(1, "La contraseña es requerida").min(8, "La contraseña debe tener al menos 8 caracteres").max(32, "La contraseña debe tener menos de 32 caracteres"),
-    confirmPassword: z.string().min(1, "La confirmación de la contraseña es requerida").min(8, "La confirmación de la contraseña debe tener al menos 8 caracteres").max(32, "La confirmación de la contraseña debe tener menos de 32 caracteres"),
-}).refine((data) => data.password === data.confirmPassword, {
-    message: "Las contraseñas no coinciden",
-    path: ["confirmPassword"],
-});
-
-type RegisterFormData = z.infer<typeof registerSchema>;
-
-type ResponseRegisterError = {
-    errors?: {
-        name?: string | string[];
-        last_name?: string | string[];
-        lastName?: string | string[];
-        email?: string | string[];
-        password?: string | string[];
-        confirm_password?: string | string[];
-        confirmPassword?: string | string[];
-    };
-    message?: string;
-};
+import { registerSchema, type RegisterFormData, type ResponseRegisterError } from "@/schemas/auth";
 
 export default function RegisterPage() {
     const {
@@ -39,18 +13,17 @@ export default function RegisterPage() {
         handleSubmit,
         setError,
         formState: { errors, isSubmitting },
-    } = useForm<RegisterFormData>(
-        {
-            resolver: zodResolver(registerSchema),
-            defaultValues: {
-                name: "",
-                lastName: "",
-                email: "",
-                password: "",
-                confirmPassword: "",
-            }
-        }
-    );
+    } = useForm<RegisterFormData>({
+        resolver: zodResolver(registerSchema),
+        defaultValues: {
+            name: "",
+            lastName: "",
+            email: "",
+            role: "ANALISTA_TESORERIA",
+            password: "",
+            confirmPassword: "",
+        },
+    });
 
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -67,6 +40,7 @@ export default function RegisterPage() {
                     name: data.name,
                     last_name: data.lastName,
                     email: data.email,
+                    role: data.role || "ANALISTA_TESORERIA",
                     password: data.password,
                     confirm_password: data.confirmPassword,
                 }),
@@ -127,18 +101,16 @@ export default function RegisterPage() {
     return (
         <div className="w-full max-w-md px-4 sm:px-0 py-8">
             <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-8 sm:p-10 shadow-xl shadow-neutral-950/5 dark:shadow-black/40">
-                {/* Encabezado */}
                 <div className="flex flex-col items-center text-center mb-8">
                     <img src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
                     <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 mt-2">
                         Crear Cuenta
                     </h1>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                        Gestor Financiero • Pasivos y Tesorería
+                        Gestor de Facturación • Pasivos y Tesorería
                     </p>
                 </div>
 
-                {/* Mensaje de error */}
                 {errorMessage && (
                     <div className="mb-6 p-3.5 rounded-xl bg-locatel-naranja/10 border border-locatel-naranja/30 text-locatel-naranja text-sm flex items-center gap-2.5">
                         <AlertCircle className="w-5 h-5 shrink-0" />
@@ -146,9 +118,7 @@ export default function RegisterPage() {
                     </div>
                 )}
 
-                {/* Formulario */}
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-                    {/* Campo de Nombre */}
                     <div>
                         <label
                             htmlFor="name"
@@ -161,25 +131,23 @@ export default function RegisterPage() {
                                 <User className="w-5 h-5" />
                             </div>
                             <input
-                                {...register('name')}
+                                {...register("name")}
                                 type="text"
                                 placeholder="ej. Juan Pérez"
                                 autoComplete="name"
                                 className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 text-sm focus:outline-none focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/30 transition-all"
                             />
                         </div>
-                        {
-                            errors.name && (
-                                <span className="text-xs text-red-500 mt-1 block">
-                                    {errors.name.message}
-                                </span>
-                            )
-                        }
+                        {errors.name && (
+                            <span className="text-xs text-red-500 mt-1 block">
+                                {errors.name.message}
+                            </span>
+                        )}
                     </div>
-                    {/* Campo de Apellido */}
+
                     <div>
                         <label
-                            htmlFor="last_name"
+                            htmlFor="lastName"
                             className="block text-xs font-semibold uppercase tracking-wider text-neutral-700 dark:text-neutral-300 mb-1.5"
                         >
                             Apellido
@@ -189,23 +157,21 @@ export default function RegisterPage() {
                                 <User className="w-5 h-5" />
                             </div>
                             <input
-                                {...register('lastName')}
+                                {...register("lastName")}
                                 type="text"
                                 placeholder="ej. Pérez"
                                 required
-                                autoComplete="name"
+                                autoComplete="family-name"
                                 className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 text-sm focus:outline-none focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/30 transition-all"
                             />
                         </div>
-                        {
-                            errors.lastName && (
-                                <span className="text-xs text-red-500 mt-1 block">
-                                    {errors.lastName.message}
-                                </span>
-                            )
-                        }
+                        {errors.lastName && (
+                            <span className="text-xs text-red-500 mt-1 block">
+                                {errors.lastName.message}
+                            </span>
+                        )}
                     </div>
-                    {/* Correo */}
+
                     <div>
                         <label
                             htmlFor="email"
@@ -226,16 +192,37 @@ export default function RegisterPage() {
                                 className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 text-sm focus:outline-none focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/30 transition-all"
                             />
                         </div>
-                        {
-                            errors.email && (
-                                <span className="text-xs text-red-500 mt-1 block">
-                                    {errors.email.message}
-                                </span>
-                            )
-                        }
+                        {errors.email && (
+                            <span className="text-xs text-red-500 mt-1 block">
+                                {errors.email.message}
+                            </span>
+                        )}
                     </div>
 
-                    {/* Campo de Contraseña */}
+                    <div>
+                        <label
+                            htmlFor="role"
+                            className="block text-xs font-semibold uppercase tracking-wider text-neutral-700 dark:text-neutral-300 mb-1.5"
+                        >
+                            Rol en el Sistema
+                        </label>
+                        <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-neutral-400 dark:text-neutral-500">
+                                <ShieldCheck className="w-5 h-5" />
+                            </div>
+                            <select
+                                {...register("role")}
+                                id="role"
+                                className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 text-sm focus:outline-none focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/30 transition-all cursor-pointer"
+                            >
+                                <option value="ANALISTA_TESORERIA">Analista de Tesorería</option>
+                            </select>
+                        </div>
+                        <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1">
+                            El rol de Coordinador de Tesorería o Administrador solo puede ser elevado por un Administrador del sistema.
+                        </p>
+                    </div>
+
                     <div>
                         <label
                             htmlFor="password"
@@ -275,7 +262,6 @@ export default function RegisterPage() {
                         )}
                     </div>
 
-                    {/* Campo de Confirmar Contraseña */}
                     <div>
                         <label
                             htmlFor="confirmPassword"
@@ -315,7 +301,6 @@ export default function RegisterPage() {
                         )}
                     </div>
 
-                    {/* Botón de Registro */}
                     <button
                         type="submit"
                         disabled={isSubmitting}
@@ -335,7 +320,6 @@ export default function RegisterPage() {
                     </button>
                 </form>
 
-                {/* Enlace a Inicio de Sesión */}
                 <div className="mt-8 pt-6 border-t border-neutral-200 dark:border-neutral-800 text-center">
                     <p className="text-sm text-neutral-500 dark:text-neutral-400">
                         ¿Ya tienes una cuenta?{" "}

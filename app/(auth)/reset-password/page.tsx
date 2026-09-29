@@ -134,7 +134,6 @@ function ResetPasswordForm() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Nueva Contraseña */}
         <div>
           <label
             htmlFor="password"
@@ -168,7 +167,6 @@ function ResetPasswordForm() {
           </div>
         </div>
 
-        {/* Confirmar Nueva Contraseña */}
         <div>
           <label
             htmlFor="confirmPassword"

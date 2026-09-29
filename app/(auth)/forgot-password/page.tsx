@@ -47,19 +47,17 @@ export default function ForgotPasswordPage() {
     return (
         <div className="w-full max-w-md px-4 sm:px-0 py-8">
             <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-8 sm:p-10 shadow-xl shadow-neutral-950/5 dark:shadow-black/40">
-                {/* Encabezado */}
                 <div className="flex flex-col items-center text-center mb-8">
                     <img src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
                     <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 mt-2">
                         Recuperar Contraseña
                     </h1>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                        Gestor Financiero • Pasivos y Tesorería
+                        Gestor de Facturación • Pasivos y Tesorería
                     </p>
                 </div>
 
                 {isSubmitted ? (
-                    /* Pantalla de confirmación tras enviar correo */
                     <div className="text-center space-y-5">
                         <div className="w-12 h-12 rounded-2xl bg-locatel-medio/10 text-locatel-medio flex items-center justify-center mx-auto">
                             <CheckCircle2 className="w-6 h-6" />
@@ -93,7 +91,6 @@ export default function ForgotPasswordPage() {
                         </div>
                     </div>
                 ) : (
-                    /* Formulario de solicitud */
                     <>
                         {errorMessage && (
                             <div className="mb-6 p-3.5 rounded-xl bg-locatel-naranja/10 border border-locatel-naranja/30 text-locatel-naranja text-sm flex items-center gap-2.5">
@@ -150,7 +147,6 @@ export default function ForgotPasswordPage() {
                             </button>
                         </form>
 
-                        {/* Volver a Login */}
                         <div className="mt-8 pt-6 border-t border-neutral-200 dark:border-neutral-800 text-center">
                             <Link
                                 href="/login"
