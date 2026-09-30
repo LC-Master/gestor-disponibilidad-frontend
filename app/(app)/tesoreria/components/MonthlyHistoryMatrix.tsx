@@ -24,6 +24,7 @@ import {
   Landmark,
 } from "lucide-react";
 import { BankAccount, Company, DailyAccountBalance } from "../types";
+import { fetchClient } from "@/lib/fetchClient";
 
 interface MonthlyHistoryMatrixProps {
   companies: Company[];
@@ -77,7 +78,7 @@ export function MonthlyHistoryMatrix({
       const startDate = `${selectedYear}-${monthStr}-01`;
       const endDate = `${selectedYear}-${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
 
-      const res = await fetch(
+      const res = await fetchClient(
         `/api/v1/treasury/companies/${selectedCompanyId}/history?start=${startDate}&end=${endDate}`
       );
       if (res.ok) {
@@ -265,9 +266,8 @@ export function MonthlyHistoryMatrix({
         columnHelper.accessor(dayKey as any, {
           header: () => (
             <div
-              className={`flex flex-col items-center justify-center py-0.5 px-1 min-w-19 ${
-                meta?.isWeekend ? "text-neutral-400 dark:text-neutral-500" : "text-neutral-700 dark:text-neutral-200"
-              }`}
+              className={`flex flex-col items-center justify-center py-0.5 px-1 min-w-19 ${meta?.isWeekend ? "text-neutral-400 dark:text-neutral-500" : "text-neutral-700 dark:text-neutral-200"
+                }`}
             >
               <span className="text-[10px] uppercase font-bold tracking-wider">
                 {meta?.weekday}
@@ -398,11 +398,10 @@ export function MonthlyHistoryMatrix({
           <div className="flex items-center p-1 bg-neutral-100 dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700">
             <button
               onClick={() => setViewMode("matrix")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                viewMode === "matrix"
-                  ? "bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs"
-                  : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${viewMode === "matrix"
+                ? "bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs"
+                : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
+                }`}
             >
               <TableIcon className="w-3.5 h-3.5" />
               <span>Matriz</span>
@@ -410,11 +409,10 @@ export function MonthlyHistoryMatrix({
 
             <button
               onClick={() => setViewMode("cards")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                viewMode === "cards"
-                  ? "bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs"
-                  : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${viewMode === "cards"
+                ? "bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs"
+                : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
+                }`}
             >
               <LayoutGrid className="w-3.5 h-3.5" />
               <span>Por Cuenta</span>
@@ -422,11 +420,10 @@ export function MonthlyHistoryMatrix({
 
             <button
               onClick={() => setViewMode("analytics")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                viewMode === "analytics"
-                  ? "bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs"
-                  : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${viewMode === "analytics"
+                ? "bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 shadow-xs"
+                : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
+                }`}
             >
               <BarChart3 className="w-3.5 h-3.5" />
               <span>Evolución</span>
@@ -475,13 +472,12 @@ export function MonthlyHistoryMatrix({
             )}
           </div>
           <div
-            className={`text-2xl font-bold font-mono tabular-nums ${
-              kpis.netChange > 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : kpis.netChange < 0
+            className={`text-2xl font-bold font-mono tabular-nums ${kpis.netChange > 0
+              ? "text-emerald-600 dark:text-emerald-400"
+              : kpis.netChange < 0
                 ? "text-red-500"
                 : "text-neutral-800 dark:text-neutral-200"
-            }`}
+              }`}
           >
             {kpis.netChange > 0 ? "+" : ""}
             {new Intl.NumberFormat("es-VE", {
@@ -534,7 +530,7 @@ export function MonthlyHistoryMatrix({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3.5 bg-white dark:bg-neutral-900 p-4.5 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
         <div>
-          <label className="block text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Building2 className="w-4 h-4 text-locatel-medio" />
             Empresa
           </label>
@@ -552,7 +548,7 @@ export function MonthlyHistoryMatrix({
         </div>
 
         <div>
-          <label className="block text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Coins className="w-4 h-4 text-locatel-medio" />
             Moneda
           </label>
@@ -568,7 +564,7 @@ export function MonthlyHistoryMatrix({
         </div>
 
         <div>
-          <label className="block text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-locatel-medio" />
             Mes
           </label>
@@ -586,7 +582,7 @@ export function MonthlyHistoryMatrix({
         </div>
 
         <div>
-          <label className="block text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-locatel-medio" />
             Año
           </label>
@@ -604,7 +600,7 @@ export function MonthlyHistoryMatrix({
         </div>
 
         <div>
-          <label className="block text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs sm:text-sm font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Search className="w-4 h-4 text-locatel-medio" />
             Buscar Cuenta
           </label>
@@ -660,32 +656,30 @@ export function MonthlyHistoryMatrix({
                   key={day}
                   onMouseEnter={() => setHoveredDay(day)}
                   onMouseLeave={() => setHoveredDay(null)}
-                  className="flex-1 min-w-[22px] flex flex-col items-center justify-end h-full group relative cursor-pointer"
+                  className="flex-1 min-w-5.5 flex flex-col items-center justify-end h-full group relative cursor-pointer"
                 >
                   <div className="w-full flex items-end justify-center h-full">
                     {hasData ? (
                       <div
                         style={{ height: `${heightPct}%` }}
-                        className={`w-full rounded-t-md transition-all duration-200 group-hover:opacity-90 ${
-                          isPeak
-                            ? "bg-gradient-to-t from-emerald-600 to-locatel-claro shadow-xs ring-2 ring-emerald-400/40"
-                            : isWeekend
+                        className={`w-full rounded-t-md transition-all duration-200 group-hover:opacity-90 ${isPeak
+                          ? "bg-linear-to-t from-emerald-600 to-locatel-claro shadow-xs ring-2 ring-emerald-400/40"
+                          : isWeekend
                             ? "bg-neutral-300 dark:bg-neutral-700"
                             : "bg-locatel-medio dark:bg-emerald-500/80"
-                        }`}
+                          }`}
                       />
                     ) : (
                       <div className="w-full h-1 bg-neutral-200 dark:bg-neutral-800 rounded-full" />
                     )}
                   </div>
                   <span
-                    className={`text-[10px] font-mono font-medium mt-2 ${
-                      hoveredDay === day
-                        ? "text-locatel-medio font-bold"
-                        : isWeekend
+                    className={`text-[10px] font-mono font-medium mt-2 ${hoveredDay === day
+                      ? "text-locatel-medio font-bold"
+                      : isWeekend
                         ? "text-neutral-400 dark:text-neutral-600"
                         : "text-neutral-600 dark:text-neutral-400"
-                    }`}
+                      }`}
                   >
                     {day}
                   </span>
@@ -771,13 +765,12 @@ export function MonthlyHistoryMatrix({
                       Variación Mes
                     </span>
                     <span
-                      className={`text-sm font-bold font-mono tabular-nums flex items-center gap-1 mt-0.5 ${
-                        acc.net > 0
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : acc.net < 0
+                      className={`text-sm font-bold font-mono tabular-nums flex items-center gap-1 mt-0.5 ${acc.net > 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : acc.net < 0
                           ? "text-red-500"
                           : "text-neutral-600 dark:text-neutral-400"
-                      }`}
+                        }`}
                     >
                       {acc.net > 0 ? "+" : ""}
                       {new Intl.NumberFormat("es-VE", {
@@ -802,11 +795,10 @@ export function MonthlyHistoryMatrix({
                         <div
                           key={idx}
                           style={{ height: `${hPct}%` }}
-                          className={`flex-1 rounded-t-xs transition-all ${
-                            val > 0
-                              ? "bg-locatel-medio/80 hover:bg-locatel-medio"
-                              : "bg-neutral-200 dark:bg-neutral-700"
-                          }`}
+                          className={`flex-1 rounded-t-xs transition-all ${val > 0
+                            ? "bg-locatel-medio/80 hover:bg-locatel-medio"
+                            : "bg-neutral-200 dark:bg-neutral-700"
+                            }`}
                           title={`Día ${idx + 1}: ${new Intl.NumberFormat("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val)}`}
                         />
                       );
@@ -828,7 +820,7 @@ export function MonthlyHistoryMatrix({
             </div>
           )}
 
-          <div className="overflow-x-auto custom-scrollbar max-h-[640px] relative">
+          <div className="overflow-x-auto custom-scrollbar max-h-160 relative">
             <table className="w-full text-left border-collapse text-xs">
               <thead className="sticky top-0 z-30 bg-neutral-50/95 dark:bg-neutral-800/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-700 shadow-xs">
                 {table.getHeaderGroups().map((headerGroup) => (
@@ -838,11 +830,10 @@ export function MonthlyHistoryMatrix({
                       return (
                         <th
                           key={header.id}
-                          className={`py-3 px-3.5 font-bold text-neutral-800 dark:text-neutral-200 select-none ${
-                            isPinned
-                              ? "sticky left-0 z-40 bg-neutral-50/95 dark:bg-neutral-800/95 border-r border-neutral-200/80 dark:border-neutral-700 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.06)]"
-                              : "text-center whitespace-nowrap hover:bg-neutral-100/60 dark:hover:bg-neutral-700/40 transition-colors"
-                          }`}
+                          className={`py-3 px-3.5 font-bold text-neutral-800 dark:text-neutral-200 select-none ${isPinned
+                            ? "sticky left-0 z-40 bg-neutral-50/95 dark:bg-neutral-800/95 border-r border-neutral-200/80 dark:border-neutral-700 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.06)]"
+                            : "text-center whitespace-nowrap hover:bg-neutral-100/60 dark:hover:bg-neutral-700/40 transition-colors"
+                            }`}
                         >
                           <table.FlexRender header={header} />
                         </th>
@@ -873,11 +864,10 @@ export function MonthlyHistoryMatrix({
                         return (
                           <td
                             key={cell.id}
-                            className={`py-2 px-3 whitespace-nowrap ${
-                              isPinned
-                                ? "sticky left-0 z-20 bg-white dark:bg-neutral-900 group-hover:bg-neutral-50 dark:group-hover:bg-neutral-800/80 border-r border-neutral-200/80 dark:border-neutral-700 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.06)]"
-                                : ""
-                            }`}
+                            className={`py-2 px-3 whitespace-nowrap ${isPinned
+                              ? "sticky left-0 z-20 bg-white dark:bg-neutral-900 group-hover:bg-neutral-50 dark:group-hover:bg-neutral-800/80 border-r border-neutral-200/80 dark:border-neutral-700 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.06)]"
+                              : ""
+                              }`}
                           >
                             <table.FlexRender cell={cell} />
                           </td>

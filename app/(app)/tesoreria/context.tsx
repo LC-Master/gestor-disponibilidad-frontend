@@ -2,11 +2,9 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { Bank, BankAccount, Company, UserProfile } from "./types";
-import { TabType } from "@/components/layout/AppSidebar";
+import { fetchClient, clearAuthSession } from "@/lib/fetchClient";
 
 interface TreasuryContextType {
-  activeTab: TabType;
-  setActiveTab: (tab: TabType) => void;
   user: UserProfile | null;
   companies: Company[];
   banks: Bank[];
@@ -23,7 +21,6 @@ const TreasuryContext = createContext<TreasuryContextType | null>(null);
 
 export function TreasuryProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [activeTab, setActiveTab] = useState<TabType>("accounts");
   const [closingPreload, setClosingPreload] = useState<{ date: string; companyId: string } | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -34,10 +31,10 @@ export function TreasuryProvider({ children }: { children: ReactNode }) {
   const loadData = async () => {
     try {
       const [userRes, companiesRes, banksRes, accountsRes] = await Promise.all([
-        fetch("/api/auth/me"),
-        fetch("/api/v1/treasury/companies"),
-        fetch("/api/v1/treasury/banks"),
-        fetch("/api/v1/treasury/accounts"),
+        fetchClient("/api/auth/me"),
+        fetchClient("/api/v1/treasury/companies"),
+        fetchClient("/api/v1/treasury/banks"),
+        fetchClient("/api/v1/treasury/accounts"),
       ]);
 
       if (userRes.ok) {
@@ -75,12 +72,13 @@ export function TreasuryProvider({ children }: { children: ReactNode }) {
 
   const handleLogout = async () => {
     try {
-      await fetch("/api/auth/logout", {
+      await fetchClient("/api/auth/logout", {
         method: "POST",
       });
     } catch (err) {
       console.error(err);
     } finally {
+      clearAuthSession();
       window.location.href = "/login";
     }
   };
@@ -88,8 +86,6 @@ export function TreasuryProvider({ children }: { children: ReactNode }) {
   return (
     <TreasuryContext.Provider
       value={{
-        activeTab,
-        setActiveTab,
         user,
         companies,
         banks,

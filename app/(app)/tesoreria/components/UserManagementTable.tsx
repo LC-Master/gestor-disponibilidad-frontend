@@ -21,85 +21,17 @@ import {
   Lock,
 } from "lucide-react";
 import { toast } from "sonner";
+import { fetchClient } from "@/lib/fetchClient";
 import { PermissionDetail, RoleDetail, UserProfile, UserWithRoles } from "../types";
 
 interface UserManagementTableProps {
   currentUser?: UserProfile | null;
 }
 
-const DEFAULT_ROLES: RoleDetail[] = [
-  {
-    name: "ADMIN",
-    display_name: "Administrador Global",
-    description: "Acceso total al sistema, auditoría y control de usuarios.",
-  },
-  {
-    name: "COORD_TESORERIA",
-    display_name: "Coordinador de Tesorería",
-    description: "Aprobación de disponibilidad, distribución de presupuesto y edición de saldos.",
-  },
-  {
-    name: "ANALISTA_TESORERIA",
-    display_name: "Analista de Tesorería",
-    description: "Carga diaria de saldos bancarios por cuenta con bloqueo operativo.",
-  },
-];
-
-const DEFAULT_PERMISSIONS: PermissionDetail[] = [
-  {
-    code: "treasury.accounts.view",
-    name: "Ver Cuentas y Terminales",
-    description: "Consultar catálogo de bancos, cuentas y terminales activas",
-    module: "Cuentas Bancarias",
-  },
-  {
-    code: "treasury.accounts.manage",
-    name: "Gestionar Cuentas y Bancos",
-    description: "Crear y dar de alta nuevas cuentas, bancos y empresas",
-    module: "Cuentas Bancarias",
-  },
-  {
-    code: "treasury.balances.record",
-    name: "Cargar Saldos Operativos",
-    description: "Ingresar montos de cierre diario por banco y cuenta operativa",
-    module: "Posición Diaria",
-  },
-  {
-    code: "treasury.balances.override",
-    name: "Modificar Saldos Fijados",
-    description: "Editar y ajustar saldos previamente cerrados en el día",
-    module: "Posición Diaria",
-  },
-  {
-    code: "treasury.availability.approve",
-    name: "Aprobar Disponibilidad Diaria",
-    description: "Aprobar y consolidar disponibilidad diaria con rubros de pago",
-    module: "Disponibilidad",
-  },
-  {
-    code: "treasury.history.view",
-    name: "Consultar Historial Mensual",
-    description: "Visualizar matriz histórica de movimientos y análisis acumulado",
-    module: "Historial y Reportes",
-  },
-  {
-    code: "users.view",
-    name: "Visualizar Directorio de Usuarios",
-    description: "Consultar lista de usuarios, estados y asignaciones actuales",
-    module: "Control de Usuarios",
-  },
-  {
-    code: "users.manage",
-    name: "Administrar Usuarios y Roles",
-    description: "Crear usuarios, modificar credenciales y elevar roles o permisos",
-    module: "Control de Usuarios",
-  },
-];
-
 export function UserManagementTable({ currentUser }: UserManagementTableProps) {
   const [users, setUsers] = useState<UserWithRoles[]>([]);
-  const [availableRoles, setAvailableRoles] = useState<RoleDetail[]>(DEFAULT_ROLES);
-  const [availablePermissions, setAvailablePermissions] = useState<PermissionDetail[]>(DEFAULT_PERMISSIONS);
+  const [availableRoles, setAvailableRoles] = useState<RoleDetail[]>([]);
+  const [availablePermissions, setAvailablePermissions] = useState<PermissionDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -158,9 +90,9 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
   const loadData = async () => {
     try {
       const [usersRes, rolesRes, permsRes] = await Promise.all([
-        fetch("/api/v1/users"),
-        fetch("/api/v1/roles"),
-        fetch("/api/v1/permissions"),
+        fetchClient("/api/v1/users"),
+        fetchClient("/api/roles").catch(() => fetchClient("/api/v1/roles")),
+        fetchClient("/api/permissions").catch(() => fetchClient("/api/v1/permissions")),
       ]);
 
       if (usersRes.ok) {
@@ -168,29 +100,25 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
         setUsers(Array.isArray(data) ? data : []);
       }
 
-      if (rolesRes.ok) {
+      if (rolesRes && rolesRes.ok) {
         const rolesData = await rolesRes.json();
         if (Array.isArray(rolesData) && rolesData.length > 0) {
           const mapped = rolesData.map((r: any) => ({
             name: r.name,
-            display_name: r.display_name || (
-              r.name === "ADMIN" ? "Administrador Global" :
-              r.name === "COORD_TESORERIA" ? "Coordinador de Tesorería" :
-              r.name === "ANALISTA_TESORERIA" ? "Analista de Tesorería" : r.name
-            ),
+            display_name: r.display_name || r.name,
             description: r.description || "",
           }));
           setAvailableRoles(mapped);
         }
       }
 
-      if (permsRes.ok) {
+      if (permsRes && permsRes.ok) {
         const permsData = await permsRes.json();
         if (Array.isArray(permsData) && permsData.length > 0) {
           setAvailablePermissions(permsData);
         }
       }
-    } catch (err) {
+    } catch {
       toast.error("Error al sincronizar datos de usuarios");
     } finally {
       setLoading(false);
@@ -228,9 +156,27 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
   const permissionsByModule = useMemo(() => {
     const map = new Map<string, PermissionDetail[]>();
     availablePermissions.forEach((p) => {
-      const list = map.get(p.module) || [];
-      list.push(p);
-      map.set(p.module, list);
+      const prefix = (p.code || "").split(".")[0]?.toLowerCase().trim();
+      let moduleName = "Otros Permisos";
+      if (prefix === "treasury") {
+        moduleName = "Tesorería";
+      } else if (prefix === "cxp") {
+        moduleName = "Cuentas por Pagar";
+      } else if (prefix === "users" || prefix === "roles") {
+        moduleName = "Administración / Seguridad";
+      } else if (p.module) {
+        moduleName = p.module;
+      } else if (prefix) {
+        moduleName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+      }
+      const list = map.get(moduleName) || [];
+      list.push({
+        code: p.code,
+        name: p.name || p.code,
+        description: p.description || p.code,
+        module: moduleName,
+      });
+      map.set(moduleName, list);
     });
     return map;
   }, [availablePermissions]);
@@ -244,7 +190,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
       return;
     }
     try {
-      const res = await fetch(`/api/v1/users/${user.id}/toggle-status`, {
+      const res = await fetchClient(`/api/v1/users/${user.id}/toggle-status`, {
         method: "PATCH",
       });
       if (!res.ok) {
@@ -299,7 +245,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/v1/users", {
+      const res = await fetchClient("/api/v1/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -362,7 +308,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
         payload.confirm_password = editForm.confirmPassword.trim();
       }
 
-      const res = await fetch(`/api/v1/users/${selectedUser.id}`, {
+      const res = await fetchClient(`/api/v1/users/${selectedUser.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -489,9 +435,9 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
     return (
       <span
         key={roleName}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800"
       >
-        <User className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+        <User className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
         Analista de Tesorería
       </span>
     );
@@ -667,11 +613,10 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                         <td className="px-4 py-3.5 text-center">
                           {isProtected ? (
                             <span
-                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold opacity-75 cursor-not-allowed ${
-                                u.is_active
+                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold opacity-75 cursor-not-allowed ${u.is_active
                                   ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800"
                                   : "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-400 border border-red-300 dark:border-red-800"
-                              }`}
+                                }`}
                               title="Cuenta protegida: solo un administrador puede modificarla"
                             >
                               <Lock className="w-3 h-3 text-amber-500" />
@@ -680,11 +625,10 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                           ) : (
                             <button
                               onClick={() => handleToggleStatus(u)}
-                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${
-                                u.is_active
+                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${u.is_active
                                   ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-200"
                                   : "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-400 border border-red-300 dark:border-red-800 hover:bg-red-200"
-                              }`}
+                                }`}
                               title={`Click para ${u.is_active ? "desactivar" : "activar"} acceso`}
                             >
                               <Power className="w-3 h-3" />
@@ -826,12 +770,11 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                       onChange={(e) =>
                         setCreateForm({ ...createForm, confirmPassword: e.target.value })
                       }
-                      className={`w-full pl-3 pr-9 py-2 text-xs rounded-xl border bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 transition-all ${
-                        createForm.confirmPassword &&
-                        createForm.password !== createForm.confirmPassword
+                      className={`w-full pl-3 pr-9 py-2 text-xs rounded-xl border bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 transition-all ${createForm.confirmPassword &&
+                          createForm.password !== createForm.confirmPassword
                           ? "border-red-500 focus:ring-red-400"
                           : "border-neutral-300 dark:border-neutral-700 focus:ring-locatel-medio"
-                      }`}
+                        }`}
                     />
                     <button
                       type="button"
@@ -862,20 +805,18 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                       <div
                         key={role.name}
                         onClick={() => toggleRoleSelection(role.name, true)}
-                        className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
-                          isChecked
+                        className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${isChecked
                             ? "border-locatel-medio bg-locatel-medio/5 dark:bg-locatel-medio/10 shadow-xs"
                             : "border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between font-bold text-neutral-900 dark:text-neutral-100 mb-1">
                           <span>{role.display_name}</span>
                           <div
-                            className={`w-4 h-4 rounded-md flex items-center justify-center border ${
-                              isChecked
+                            className={`w-4 h-4 rounded-md flex items-center justify-center border ${isChecked
                                 ? "bg-locatel-medio border-locatel-medio text-white"
                                 : "border-neutral-300 dark:border-neutral-600"
-                            }`}
+                              }`}
                           >
                             {isChecked && <Check className="w-3 h-3" />}
                           </div>
@@ -934,11 +875,10 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                             return (
                               <label
                                 key={p.code}
-                                className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                                  isPermChecked
+                                className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${isPermChecked
                                     ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30"
                                     : "border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
-                                }`}
+                                  }`}
                               >
                                 <input
                                   type="checkbox"
@@ -1097,13 +1037,12 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                       onChange={(e) =>
                         setEditForm({ ...editForm, confirmPassword: e.target.value })
                       }
-                      className={`w-full pl-3 pr-9 py-2 text-xs rounded-xl border bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 transition-all ${
-                        editForm.password &&
-                        editForm.confirmPassword &&
-                        editForm.password !== editForm.confirmPassword
+                      className={`w-full pl-3 pr-9 py-2 text-xs rounded-xl border bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 transition-all ${editForm.password &&
+                          editForm.confirmPassword &&
+                          editForm.password !== editForm.confirmPassword
                           ? "border-red-500 focus:ring-red-400"
                           : "border-neutral-300 dark:border-neutral-700 focus:ring-locatel-medio"
-                      }`}
+                        }`}
                     />
                     <button
                       type="button"
@@ -1135,20 +1074,18 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                       <div
                         key={role.name}
                         onClick={() => toggleRoleSelection(role.name, false)}
-                        className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
-                          isChecked
+                        className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${isChecked
                             ? "border-locatel-medio bg-locatel-medio/5 dark:bg-locatel-medio/10 shadow-xs"
                             : "border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between font-bold text-neutral-900 dark:text-neutral-100 mb-1">
                           <span>{role.display_name}</span>
                           <div
-                            className={`w-4 h-4 rounded-md flex items-center justify-center border ${
-                              isChecked
+                            className={`w-4 h-4 rounded-md flex items-center justify-center border ${isChecked
                                 ? "bg-locatel-medio border-locatel-medio text-white"
                                 : "border-neutral-300 dark:border-neutral-600"
-                            }`}
+                              }`}
                           >
                             {isChecked && <Check className="w-3 h-3" />}
                           </div>
@@ -1207,11 +1144,10 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                             return (
                               <label
                                 key={p.code}
-                                className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${
-                                  isPermChecked
+                                className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${isPermChecked
                                     ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30"
                                     : "border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
-                                }`}
+                                  }`}
                               >
                                 <input
                                   type="checkbox"

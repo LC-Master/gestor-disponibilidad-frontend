@@ -10,15 +10,11 @@ import {
   Lock,
   RefreshCw,
   AlertTriangle,
-  DollarSign,
   History,
-  ShieldCheck,
-  UserCheck,
-  TrendingUp,
-  TrendingDown,
-  Landmark,
+  ShieldCheck
 } from "lucide-react";
 import { toast } from "sonner";
+import { fetchClient } from "@/lib/fetchClient";
 import { BankAccount, Company, DailyAvailability, UserProfile } from "../types";
 
 interface DailyClosingMatrixProps {
@@ -98,19 +94,19 @@ export function DailyClosingMatrix({
     setLoadingExisting(true);
     try {
       const targetCompany = companyId === "all" && companies.length > 0 ? companies[0].id : companyId;
-      
+
       const posPromises =
         companyId === "all"
           ? companies.map((c) =>
-              fetch(`/api/v1/treasury/companies/${c.id}/position?date=${date}`)
-                .then((r) => (r.ok ? r.json() : []))
-                .catch(() => [])
-            )
+            fetchClient(`/api/v1/treasury/companies/${c.id}/position?date=${date}`)
+              .then((r) => (r.ok ? r.json() : []))
+              .catch(() => [])
+          )
           : [
-              fetch(`/api/v1/treasury/companies/${companyId}/position?date=${date}`)
-                .then((r) => (r.ok ? r.json() : []))
-                .catch(() => []),
-            ];
+            fetchClient(`/api/v1/treasury/companies/${companyId}/position?date=${date}`)
+              .then((r) => (r.ok ? r.json() : []))
+              .catch(() => []),
+          ];
 
       const posResults = await Promise.all(posPromises);
       const allBalances = posResults.flat();
@@ -138,7 +134,7 @@ export function DailyClosingMatrix({
           ? `/api/v1/treasury/companies/${targetCompany}/availability?date=${date}`
           : `/api/v1/treasury/availabilities/history?start=${date}&end=${date}`;
 
-      const availRes = await fetch(availUrl);
+      const availRes = await fetchClient(availUrl);
       if (availRes.ok) {
         const raw = await availRes.json();
         const availData: DailyAvailability | null = Array.isArray(raw) ? raw[0] || null : raw;
@@ -181,14 +177,14 @@ export function DailyClosingMatrix({
     const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
     const end = todayStr;
 
-    fetch(`/api/v1/treasury/companies/${targetComp}/availabilities/history?start=${start}&end=${end}`)
+    fetchClient(`/api/v1/treasury/companies/${targetComp}/availabilities/history?start=${start}&end=${end}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
         if (Array.isArray(data)) {
           setHistoryAvailabilities(data);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [selectedCompanyId, companies, todayStr]);
 
   const handleInputChange = (accountId: string, value: string) => {
@@ -291,7 +287,7 @@ export function DailyClosingMatrix({
 
     setSavingAccountId(accountId);
     try {
-      const res = await fetch(`/api/v1/treasury/accounts/${accountId}/daily-balance`, {
+      const res = await fetchClient(`/api/v1/treasury/accounts/${accountId}/daily-balance`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -313,60 +309,6 @@ export function DailyClosingMatrix({
       toast.error(err instanceof Error ? err.message : "Error al registrar saldo");
     } finally {
       setSavingAccountId(null);
-    }
-  };
-
-  const handleSavePositionOnly = async () => {
-    if (!selectedDate) {
-      toast.error("Seleccione una fecha válida");
-      return;
-    }
-    if (activeAccounts.length === 0) {
-      toast.error("No hay cuentas activas");
-      return;
-    }
-
-    const accountsToSubmit = !canOverrideBalances
-      ? activeAccounts.filter((acc) => !loadedAccountIds.has(acc.id))
-      : activeAccounts;
-
-    if (accountsToSubmit.length === 0) {
-      toast.info("Todas las cuentas para esta fecha ya han sido registradas previamente");
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const items = accountsToSubmit.map((acc) => {
-        const rawVal = balanceInputs[acc.id];
-        const val = rawVal !== undefined ? parseFloat(rawVal.replace(",", ".")) || 0 : acc.current_balance;
-        return {
-          account_id: acc.id,
-          amount: val,
-        };
-      });
-
-      const res = await fetch("/api/v1/treasury/daily-balances/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: selectedDate,
-          items,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Error al registrar saldos diarios");
-      }
-
-      toast.success("Saldos diarios guardados exitosamente");
-      await loadBalancesAndAvailability(selectedDate, selectedCompanyId);
-      onSaved();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al guardar");
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -397,7 +339,7 @@ export function DailyClosingMatrix({
         };
       });
 
-      const balancesRes = await fetch("/api/v1/treasury/daily-balances/batch", {
+      const balancesRes = await fetchClient("/api/v1/treasury/daily-balances/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -423,7 +365,7 @@ export function DailyClosingMatrix({
         refund_amount: refundAmount,
       };
 
-      const availRes = await fetch("/api/v1/treasury/availabilities", {
+      const availRes = await fetchClient("/api/v1/treasury/availabilities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(availPayload),
@@ -449,7 +391,7 @@ export function DailyClosingMatrix({
     <div className="space-y-3.5">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 bg-white dark:bg-neutral-900 p-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
         <div>
-          <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Building2 className="w-4 h-4 text-locatel-medio" />
             Filtrar Empresa
           </label>
@@ -468,7 +410,7 @@ export function DailyClosingMatrix({
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-locatel-medio" />
             Fecha de Cierre
           </label>
@@ -481,7 +423,7 @@ export function DailyClosingMatrix({
         </div>
 
         <div className="relative">
-          <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <History className="w-4 h-4 text-locatel-medio" />
             Historial de Posiciones
           </label>
@@ -509,9 +451,8 @@ export function DailyClosingMatrix({
                         setSelectedDate(dStr);
                         setIsHistoryOpen(false);
                       }}
-                      className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${
-                        selectedDate === dStr ? "bg-locatel-medio/10 text-locatel-medio font-bold" : "text-neutral-700 dark:text-neutral-300"
-                      }`}
+                      className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ${selectedDate === dStr ? "bg-locatel-medio/10 text-locatel-medio font-bold" : "text-neutral-700 dark:text-neutral-300"
+                        }`}
                     >
                       <span>{dStr}</span>
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold">
@@ -538,9 +479,8 @@ export function DailyClosingMatrix({
             <span className="text-[10px] uppercase font-semibold text-neutral-400 block">
               Estado Posición
             </span>
-            <span className={`text-xs font-semibold flex items-center gap-1 mt-0.5 ${
-              availabilityStatus === "APROBADO" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500"
-            }`}>
+            <span className={`text-xs font-semibold flex items-center gap-1 mt-0.5 ${availabilityStatus === "APROBADO" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500"
+              }`}>
               <CheckCircle2 className="w-3.5 h-3.5" />
               {availabilityStatus}
             </span>
@@ -565,13 +505,12 @@ export function DailyClosingMatrix({
                 <span className="font-bold text-neutral-500">{curr}</span>
                 <div className="text-right">
                   <span
-                    className={`text-[11px] font-semibold font-mono block ${
-                      diff > 0
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : diff < 0
+                    className={`text-[11px] font-semibold font-mono block ${diff > 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : diff < 0
                         ? "text-red-500"
                         : "text-neutral-400"
-                    }`}
+                      }`}
                   >
                     {diff > 0 ? "+" : ""}
                     {diffFormatted} {curr === "VES" ? "Bs." : curr}
@@ -702,13 +641,12 @@ export function DailyClosingMatrix({
                       </td>
 
                       <td className="px-3.5 py-2.5">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-                          account.currency === "USD"
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                            : account.currency === "EUR"
-                            ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${account.currency === "USD"
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                          : account.currency === "EUR"
+                            ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
                             : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
-                        }`}>
+                          }`}>
                           {account.currency}
                         </span>
                       </td>
@@ -739,14 +677,13 @@ export function DailyClosingMatrix({
                               isPositionClosed
                                 ? "Bloqueado: La posición diaria para esta fecha ya fue aprobada y cerrada."
                                 : isInputDisabled
-                                ? "Bloqueado: Esta cuenta ya tiene saldo registrado para hoy."
-                                : ""
+                                  ? "Bloqueado: Esta cuenta ya tiene saldo registrado para hoy."
+                                  : ""
                             }
-                            className={`w-full text-right px-3 py-1 font-mono font-semibold rounded-lg border text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-locatel-medio transition-all text-xs ${
-                              isInputDisabled
-                                ? "bg-neutral-100 dark:bg-neutral-800/60 border-neutral-300 dark:border-neutral-700 cursor-not-allowed opacity-75"
-                                : "bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600"
-                            }`}
+                            className={`w-full text-right px-3 py-1 font-mono font-semibold rounded-lg border text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-locatel-medio transition-all text-xs ${isInputDisabled
+                              ? "bg-neutral-100 dark:bg-neutral-800/60 border-neutral-300 dark:border-neutral-700 cursor-not-allowed opacity-75"
+                              : "bg-white dark:bg-neutral-800 border-neutral-300 dark:border-neutral-600"
+                              }`}
                           />
                           {isInputDisabled && (
                             <Lock className="w-3.5 h-3.5 text-neutral-400 absolute left-2 pointer-events-none" />
@@ -756,13 +693,12 @@ export function DailyClosingMatrix({
 
                       <td className="px-3.5 py-2.5 text-right font-mono">
                         <span
-                          className={`font-semibold block ${
-                            delta > 0
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : delta < 0
+                          className={`font-semibold block ${delta > 0
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : delta < 0
                               ? "text-red-500"
                               : "text-neutral-400"
-                          }`}
+                            }`}
                         >
                           {delta > 0 ? "+" : ""}
                           {deltaFormatted} {account.currency === "VES" ? "Bs." : account.currency}
@@ -803,11 +739,10 @@ export function DailyClosingMatrix({
                           <button
                             onClick={() => handleSaveSingleAccount(account.id)}
                             disabled={savingAccountId === account.id}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50 ${
-                              isLoaded
-                                ? "border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200"
-                                : "bg-locatel-medio hover:bg-locatel-oscuro text-white"
-                            }`}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50 ${isLoaded
+                              ? "border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200"
+                              : "bg-locatel-medio hover:bg-locatel-oscuro text-white"
+                              }`}
                             title={isLoaded ? "Modificar saldo de esta cuenta" : "Guardar saldo para esta cuenta"}
                           >
                             {savingAccountId === account.id ? (
@@ -886,16 +821,14 @@ export function DailyClosingMatrix({
               <div className="flex items-baseline gap-1.5">
                 <span className="text-[11px] font-sans text-neutral-400">Remanente:</span>
                 <span
-                  className={`font-bold ${
-                    isOverLimit ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"
-                  }`}
+                  className={`font-bold ${isOverLimit ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"
+                    }`}
                 >
                   Bs. {formatVES(remainingAvailableVES)}
                 </span>
                 <span
-                  className={`text-[10px] ${
-                    isOverLimit ? "text-red-400" : "text-emerald-500/80"
-                  }`}
+                  className={`text-[10px] ${isOverLimit ? "text-red-400" : "text-emerald-500/80"
+                    }`}
                 >
                   (${formatUSD(remainingAvailableUSD)})
                 </span>
@@ -906,11 +839,10 @@ export function DailyClosingMatrix({
           <div className="w-full h-1 rounded-full bg-neutral-100 dark:bg-neutral-800 overflow-hidden">
             <div
               style={{ width: `${committedPercent}%` }}
-              className={`h-full transition-all duration-300 rounded-full ${
-                isOverLimit
-                  ? "bg-red-500"
-                  : "bg-gradient-to-r from-emerald-500 to-locatel-medio"
-              }`}
+              className={`h-full transition-all duration-300 rounded-full ${isOverLimit
+                ? "bg-red-500"
+                : "bg-linear-to-r from-emerald-500 to-locatel-medio"
+                }`}
             />
           </div>
 

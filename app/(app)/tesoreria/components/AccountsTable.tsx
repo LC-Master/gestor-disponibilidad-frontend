@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { fetchClient } from "@/lib/fetchClient";
 import { Bank, BankAccount, Company } from "../types";
 
 interface AccountsTableProps {
@@ -175,7 +176,7 @@ export function AccountsTable({
     }
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/v1/treasury/accounts", {
+      const res = await fetchClient("/api/v1/treasury/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -211,7 +212,7 @@ export function AccountsTable({
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/v1/treasury/companies", {
+      const res = await fetchClient("/api/v1/treasury/companies", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newCompany),
@@ -235,7 +236,7 @@ export function AccountsTable({
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/v1/treasury/banks", {
+      const res = await fetchClient("/api/v1/treasury/banks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newBank),

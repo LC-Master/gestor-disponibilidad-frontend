@@ -1,17 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { User, Mail, Lock, Eye, EyeOff, Loader2, ArrowRight, AlertCircle, ShieldCheck } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { registerSchema, type RegisterFormData, type ResponseRegisterError } from "@/schemas/auth";
 
+interface RoleOption {
+    name: string;
+    display_name: string;
+    description?: string;
+}
+
 export default function RegisterPage() {
     const {
         register,
         handleSubmit,
         setError,
+        setValue,
         formState: { errors, isSubmitting },
     } = useForm<RegisterFormData>({
         resolver: zodResolver(registerSchema),
@@ -25,9 +32,54 @@ export default function RegisterPage() {
         },
     });
 
+    const [roles, setRoles] = useState<RoleOption[]>([]);
+    const [loadingRoles, setLoadingRoles] = useState(true);
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [errorMessage, setErrorMessage] = useState("");
+
+    useEffect(() => {
+        const fetchRoles = async () => {
+            try {
+                const res = await fetch("/api/v1/roles");
+                if (res.ok) {
+                    const data: RoleOption[] = await res.json();
+                    const filtered = data.filter((r) => {
+                        const u = r.name.toUpperCase().trim();
+                        return u !== "ADMIN" && u !== "ADMINISTRADOR" && !u.startsWith("COORD_");
+                    });
+                    if (filtered.length > 0) {
+                        setRoles(filtered);
+                        setValue("role", filtered[0].name);
+                    } else {
+                        const fallbackRoles: RoleOption[] = [
+                            { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería" },
+                            { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar" },
+                        ];
+                        setRoles(fallbackRoles);
+                        setValue("role", fallbackRoles[0].name);
+                    }
+                } else {
+                    const fallbackRoles: RoleOption[] = [
+                        { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería" },
+                        { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar" },
+                    ];
+                    setRoles(fallbackRoles);
+                    setValue("role", fallbackRoles[0].name);
+                }
+            } catch (err) {
+                const fallbackRoles: RoleOption[] = [
+                    { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería" },
+                    { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar" },
+                ];
+                setRoles(fallbackRoles);
+                setValue("role", fallbackRoles[0].name);
+            } finally {
+                setLoadingRoles(false);
+            }
+        };
+        fetchRoles();
+    }, [setValue]);
 
     const onSubmit = async (data: RegisterFormData) => {
         setErrorMessage("");
@@ -213,13 +265,23 @@ export default function RegisterPage() {
                             <select
                                 {...register("role")}
                                 id="role"
-                                className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 text-sm focus:outline-none focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/30 transition-all cursor-pointer"
+                                disabled={loadingRoles}
+                                className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 text-sm focus:outline-none focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/30 transition-all cursor-pointer disabled:opacity-50"
                             >
-                                <option value="ANALISTA_TESORERIA">Analista de Tesorería</option>
+                                {roles.map((r) => (
+                                    <option key={r.name} value={r.name}>
+                                        {r.display_name || r.name}
+                                    </option>
+                                ))}
                             </select>
                         </div>
+                        {errors.role && (
+                            <span className="text-xs text-red-500 mt-1 block">
+                                {errors.role.message}
+                            </span>
+                        )}
                         <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1">
-                            El rol de Coordinador de Tesorería o Administrador solo puede ser elevado por un Administrador del sistema.
+                            Los roles de Coordinación o Administración solo pueden ser asignados o elevados por un Administrador del sistema.
                         </p>
                     </div>
 

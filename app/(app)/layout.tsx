@@ -1,15 +1,14 @@
 "use client";
 
 import { ReactNode, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Menu, RotateCw } from "lucide-react";
 import { TreasuryProvider, useTreasury } from "./tesoreria/context";
-import { AppSidebar, TabType } from "@/components/layout/AppSidebar";
+import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 function AppLayoutShell({ children }: { children: ReactNode }) {
   const {
-    activeTab,
-    setActiveTab,
     user,
     accounts,
     companies,
@@ -17,38 +16,48 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
     refreshing,
     handleRefresh,
     handleLogout,
-    setClosingPreload,
   } = useTreasury();
+
+  const pathname = usePathname();
 
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
-  const tabTitles: Record<TabType, { title: string; subtitle: string }> = {
-    accounts: {
-      title: "Gestión de Cuentas Bancarias",
-      subtitle:
-        "Administración del catálogo de cuentas, terminales, bancos y saldos operativos",
-    },
-    closing: {
-      title: "Cierre Operativo Diario",
-      subtitle:
-        "Registro de saldos del día actual, variaciones en tiempo real y distribución de liquidez",
-    },
-    closing_history: {
-      title: "Histórico de Cierres Diarios",
-      subtitle:
-        "Consulta de disponibilidades aprobadas, tasas BCV y reedición de cierres operativos",
-    },
-    history: {
-      title: "Matriz Histórica Mensual",
-      subtitle:
-        "Reporte detallado de movimientos diarios de balance con filtros por empresa y período",
-    },
-    users: {
-      title: "Control y Gestión de Usuarios",
-      subtitle:
-        "Administración centralizada de usuarios, elevación de roles y matriz de permisos",
-    },
+  const getHeaderTitle = () => {
+    if (pathname.startsWith("/cxp/facturas")) {
+      return "Cuentas por Pagar - Facturas y Documentos";
+    }
+    if (pathname.startsWith("/cxp/propuestas")) {
+      return "Cuentas por Pagar - Propuestas de Pago";
+    }
+    if (pathname.startsWith("/cxp/calendario")) {
+      return "Cuentas por Pagar - Calendario de Vencimientos";
+    }
+    if (pathname.startsWith("/cxp/proveedores")) {
+      return "Cuentas por Pagar - Maestro de Proveedores";
+    }
+    if (pathname.startsWith("/cxp/reportes/aging")) {
+      return "Cuentas por Pagar - Antigüedad de Saldos";
+    }
+    if (pathname.startsWith("/reportes")) {
+      return "Estadísticas y Reportes";
+    }
+    if (pathname.startsWith("/tesoreria/cierre")) {
+      return "Tesorería - Cierre Operativo Diario";
+    }
+    if (pathname.startsWith("/tesoreria/historico")) {
+      return "Tesorería - Histórico de Cierres";
+    }
+    if (pathname.startsWith("/tesoreria/matriz")) {
+      return "Tesorería - Matriz Histórica Mensual";
+    }
+    if (pathname.startsWith("/tesoreria")) {
+      return "Tesorería - Gestión de Cuentas Bancarias";
+    }
+    if (pathname.startsWith("/usuarios")) {
+      return "Administración - Control de Usuarios";
+    }
+    return "Gestor de Facturación";
   };
 
   const todayStr = new Intl.DateTimeFormat("es-VE", {
@@ -61,13 +70,6 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen flex bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-sans">
       <AppSidebar
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          if (tab !== "closing") {
-            setClosingPreload(null);
-          }
-        }}
         user={user}
         accounts={accounts}
         companies={companies}
@@ -91,7 +93,7 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
 
             <div>
               <h1 className="text-base sm:text-lg font-bold text-neutral-900 dark:text-neutral-100 leading-tight">
-                {tabTitles[activeTab]?.title || "Gestor de Facturación"}
+                {getHeaderTitle()}
               </h1>
               <p className="text-xs text-neutral-400 capitalize hidden sm:block">
                 {todayStr}

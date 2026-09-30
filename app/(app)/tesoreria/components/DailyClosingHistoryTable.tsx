@@ -7,13 +7,10 @@ import {
   RefreshCw,
   Search,
   ExternalLink,
-  ShieldCheck,
-  TrendingUp,
-  DollarSign,
-  Coins,
   CheckCircle2,
 } from "lucide-react";
 import { Company, DailyAvailability } from "../types";
+import { fetchClient } from "@/lib/fetchClient";
 
 interface DailyClosingHistoryTableProps {
   companies: Company[];
@@ -58,7 +55,7 @@ export function DailyClosingHistoryTable({
         selectedCompanyId === "all"
           ? `/api/v1/treasury/availabilities/history?start=${startDate}&end=${endDate}`
           : `/api/v1/treasury/companies/${selectedCompanyId}/availabilities/history?start=${startDate}&end=${endDate}`;
-      const res = await fetch(url);
+      const res = await fetchClient(url);
       if (res.ok) {
         const data = await res.json();
         setAvailabilities(Array.isArray(data) ? data : []);
@@ -120,7 +117,7 @@ export function DailyClosingHistoryTable({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
         <div>
-          <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Building2 className="w-4 h-4 text-locatel-medio" />
             Empresa
           </label>
@@ -139,7 +136,7 @@ export function DailyClosingHistoryTable({
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-locatel-medio" />
             Desde
           </label>
@@ -152,7 +149,7 @@ export function DailyClosingHistoryTable({
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Calendar className="w-4 h-4 text-locatel-medio" />
             Hasta
           </label>
@@ -165,7 +162,7 @@ export function DailyClosingHistoryTable({
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
             <Search className="w-4 h-4 text-locatel-medio" />
             Buscar
           </label>
@@ -276,11 +273,10 @@ export function DailyClosingHistoryTable({
 
                       <td className="px-3.5 py-3.5 text-right font-mono">
                         <span
-                          className={`font-bold block ${
-                            remaining < 0
-                              ? "text-red-600 dark:text-red-400"
-                              : "text-emerald-600 dark:text-emerald-400"
-                          }`}
+                          className={`font-bold block ${remaining < 0
+                            ? "text-red-600 dark:text-red-400"
+                            : "text-emerald-600 dark:text-emerald-400"
+                            }`}
                         >
                           Bs. {formatVES(remaining)}
                         </span>

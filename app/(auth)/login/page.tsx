@@ -66,6 +66,14 @@ export default function LoginPage() {
                 return;
             }
 
+            const resData = await response.json().catch(() => null);
+            if (resData?.access_token) {
+                localStorage.setItem("access_token", resData.access_token);
+            }
+            if (resData?.refresh_token) {
+                localStorage.setItem("refresh_token", resData.refresh_token);
+            }
+
             window.location.href = "/tesoreria";
         } catch (err: unknown) {
             if (err instanceof Error) {
