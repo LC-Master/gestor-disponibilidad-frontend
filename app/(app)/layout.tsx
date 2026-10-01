@@ -36,12 +36,6 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
     if (pathname.startsWith("/cxp/proveedores")) {
       return "Cuentas por Pagar - Maestro de Proveedores";
     }
-    if (pathname.startsWith("/cxp/reportes/aging")) {
-      return "Cuentas por Pagar - Antigüedad de Saldos";
-    }
-    if (pathname.startsWith("/reportes")) {
-      return "Estadísticas y Reportes";
-    }
     if (pathname.startsWith("/tesoreria/cierre")) {
       return "Tesorería - Cierre Operativo Diario";
     }

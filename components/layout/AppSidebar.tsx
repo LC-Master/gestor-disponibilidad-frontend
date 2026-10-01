@@ -4,20 +4,19 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3,
   Building2,
+  Calendar,
   CalendarCheck2,
-  CalendarDays,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ClipboardCheck,
-  Clock,
   CreditCard,
   FileCheck2,
   FileText,
   History,
   Landmark,
+  Layers,
   LogOut,
   Shield,
   User,
@@ -25,6 +24,7 @@ import {
   Wallet,
   X,
 } from "lucide-react";
+
 import { Bank, BankAccount, Company } from "@/app/(app)/tesoreria/types";
 
 interface UserProfile {
@@ -63,7 +63,6 @@ export function AppSidebar({
   const [isTreasuryOpen, setIsTreasuryOpen] = useState(true);
   const [isCxpOpen, setIsCxpOpen] = useState(true);
   const [isAdminOpen, setIsAdminOpen] = useState(true);
-  const [isReportsOpen, setIsReportsOpen] = useState(true);
 
   useEffect(() => {
     if (pathname.startsWith("/cxp")) {
@@ -72,8 +71,6 @@ export function AppSidebar({
       setIsTreasuryOpen(true);
     } else if (pathname.startsWith("/usuarios")) {
       setIsAdminOpen(true);
-    } else if (pathname.startsWith("/reportes")) {
-      setIsReportsOpen(true);
     }
   }, [pathname]);
 
@@ -122,27 +119,6 @@ export function AppSidebar({
       (p) => p.toLowerCase().trim() === "cxp.proposals.view"
     );
 
-  const canViewAging =
-    (user?.roles || []).some((r) => {
-      const u = r.toUpperCase().trim();
-      return u === "ADMIN" || u === "ADMINISTRADOR" || u === "COORD_CXP" || u === "ANALISTA_CXP";
-    }) ||
-    (user?.permissions || []).some(
-      (p) => {
-        const u = p.toLowerCase().trim();
-        return u === "cxp.reports.view" || u === "cxp.invoices.view";
-      }
-    );
-
-  const canViewReportsDashboard =
-    (user?.roles || []).some((r) => {
-      const u = r.toUpperCase().trim();
-      return u === "ADMIN" || u === "ADMINISTRADOR" || u === "COORD_CXP" || u === "COORD_TESORERIA";
-    }) ||
-    (user?.permissions || []).some(
-      (p) => p.toLowerCase().trim() === "reports.dashboard.view"
-    );
-
   const canManageUsers =
     (user?.roles || []).some((r) => {
       const u = r.toUpperCase().trim();
@@ -186,8 +162,8 @@ export function AppSidebar({
       ? [
         {
           href: "/cxp/facturas",
-          label: "Bandeja de Facturas",
-          description: "Facturas y documentos por pagar",
+          label: "Facturas Pendientes",
+          description: "Facturas por revisar y proponer",
           icon: FileText,
         },
       ]
@@ -198,15 +174,27 @@ export function AppSidebar({
           href: "/cxp/propuestas",
           label: "Propuestas de Pago",
           description: "Aprobación y revisión de propuestas",
-          icon: ClipboardCheck,
+          icon: Layers,
         },
       ]
       : []),
     {
+      href: "/cxp/programadas",
+      label: "Por Pagar (Programadas)",
+      description: "Compromisos listos para pago bancario",
+      icon: CheckCircle2,
+    },
+    {
+      href: "/cxp/historico",
+      label: "Histórico de Pagos",
+      description: "Auditoría de liquidaciones y pagos",
+      icon: History,
+    },
+    {
       href: "/cxp/calendario",
-      label: "Calendario de Vencimientos",
-      description: "Vencimientos y pasivos",
-      icon: CalendarDays,
+      label: "Calendario de Pagos",
+      description: "Vencimientos y pasivos diarios",
+      icon: Calendar,
     },
     ...(canViewSuppliers
       ? [
@@ -218,28 +206,7 @@ export function AppSidebar({
         },
       ]
       : []),
-    ...(canViewAging
-      ? [
-        {
-          href: "/cxp/reportes/aging",
-          label: "Antigüedad de Saldos",
-          description: "Aging de deudas y estados de cuenta",
-          icon: Clock,
-        },
-      ]
-      : []),
   ];
-
-  const reportItems = canViewReportsDashboard
-    ? [
-      {
-        href: "/reportes",
-        label: "Estadísticas y Reportes",
-        description: "Módulo ejecutivo y KPIs",
-        icon: BarChart3,
-      },
-    ]
-    : [];
 
   const adminItems = canManageUsers
     ? [
@@ -263,15 +230,15 @@ export function AppSidebar({
             href={item.href}
             onClick={onCloseMobile}
             className={`w-full flex items-center gap-3 px-3 py-2 rounded-2xl text-left transition-all cursor-pointer group relative ${isActive
-                ? "bg-locatel-medio/10 text-locatel-medio font-bold dark:bg-emerald-950/40 dark:text-emerald-400"
-                : "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 hover:text-neutral-900 dark:hover:text-neutral-200"
+              ? "bg-locatel-medio/10 text-locatel-medio font-bold dark:bg-emerald-950/40 dark:text-emerald-400"
+              : "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 hover:text-neutral-900 dark:hover:text-neutral-200"
               }`}
             title={isCollapsed ? item.label : undefined}
           >
             <div
               className={`p-1.5 rounded-xl transition-colors ${isActive
-                  ? "bg-locatel-medio text-white shadow-xs"
-                  : "text-neutral-500 group-hover:text-neutral-800 dark:text-neutral-400 dark:group-hover:text-neutral-200"
+                ? "bg-locatel-medio text-white shadow-xs"
+                : "text-neutral-500 group-hover:text-neutral-800 dark:text-neutral-400 dark:group-hover:text-neutral-200"
                 }`}
             >
               <Icon className="w-4 h-4" />
@@ -290,8 +257,8 @@ export function AppSidebar({
                 {item.badge && (
                   <span
                     className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold ${isActive
-                        ? "bg-locatel-medio text-white"
-                        : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"
+                      ? "bg-locatel-medio text-white"
+                      : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"
                       }`}
                   >
                     {item.badge}
@@ -409,32 +376,6 @@ export function AppSidebar({
 
           {(isCxpOpen || isCollapsed) && renderNavItems(cxpItems)}
         </div>
-
-        {reportItems.length > 0 && (
-          <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800/80">
-            {!isCollapsed ? (
-              <button
-                onClick={() => setIsReportsOpen(!isReportsOpen)}
-                className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-bold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider hover:text-neutral-900 dark:hover:text-neutral-100 rounded-lg transition-colors cursor-pointer mb-1"
-              >
-                <span className="flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-locatel-medio" />
-                  <span>Estadísticas y Reportes</span>
-                </span>
-                <ChevronDown
-                  className={`w-3.5 h-3.5 transition-transform duration-200 ${isReportsOpen ? "rotate-0" : "-rotate-90"
-                    }`}
-                />
-              </button>
-            ) : (
-              <div className="text-center py-1 mb-1">
-                <BarChart3 className="w-4 h-4 text-locatel-medio mx-auto" />
-              </div>
-            )}
-
-            {(isReportsOpen || isCollapsed) && renderNavItems(reportItems)}
-          </div>
-        )}
 
         {adminItems.length > 0 && (
           <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800/80">

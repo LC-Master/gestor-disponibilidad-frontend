@@ -268,3 +268,50 @@ export interface CreateProposalPayload {
 export interface RejectProposalPayload {
   reason: string;
 }
+
+export interface CxpAvailability {
+  company_id: string;
+  target_date: string;
+  has_approved_today: boolean;
+  is_rollover: boolean;
+  rollover_date?: string | null;
+  supplier_amount: number;
+  cupo_consumido: number;
+  cupo_libre: number;
+  exchange_rate: number;
+  status: string;
+}
+
+export interface PaymentListItem {
+  id: string;
+  company_id: string;
+  company_name: string;
+  bank_account_id: string;
+  bank_name: string;
+  account_number: string;
+  reference_number: string;
+  payment_date: string;
+  total_paid: number;
+  invoice_count: number;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+}
+
+export interface PaymentInvoiceDetailItem {
+  invoice_id: string;
+  invoice_number: string;
+  control_number?: string;
+  supplier_rif: string;
+  supplier_name: string;
+  sap_document_type: string;
+  currency: string;
+  total_amount: number;
+  amount_paid: number;
+}
+
+export interface PaymentDetailResponse {
+  payment: PaymentListItem;
+  invoices: PaymentInvoiceDetailItem[];
+}
+

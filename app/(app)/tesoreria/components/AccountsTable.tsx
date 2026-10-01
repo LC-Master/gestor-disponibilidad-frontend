@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { fetchClient } from "@/lib/fetchClient";
 import { Bank, BankAccount, Company } from "../types";
+import { companySchema, bankSchema, bankAccountSchema } from "@/schemas/treasury";
 
 interface AccountsTableProps {
   accounts: BankAccount[];
@@ -58,7 +59,7 @@ export function AccountsTable({
     account_number: "",
     terminal_code: "",
     currency: "VES",
-    account_type: "Corriente",
+    account_type: "CORRIENTE",
     initial_balance: "0",
   });
 
@@ -75,6 +76,9 @@ export function AccountsTable({
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [accountErrors, setAccountErrors] = useState<Record<string, string>>({});
+  const [companyErrors, setCompanyErrors] = useState<Record<string, string>>({});
+  const [bankErrors, setBankErrors] = useState<Record<string, string>>({});
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -170,8 +174,27 @@ export function AccountsTable({
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAccount.company_id || !newAccount.bank_id) {
-      toast.error("Seleccione empresa y banco");
+    setAccountErrors({});
+    const selectedBankObj = banks.find((b) => b.id === newAccount.bank_id);
+    const parsed = bankAccountSchema.safeParse({
+      company_id: newAccount.company_id,
+      bank_id: newAccount.bank_id,
+      account_alias: newAccount.account_alias,
+      account_number: newAccount.account_number,
+      terminal_code: newAccount.terminal_code,
+      currency: newAccount.currency,
+      account_type: newAccount.account_type,
+      is_cash: selectedBankObj?.is_cash ?? false,
+    });
+    if (!parsed.success) {
+      const errMap: Record<string, string> = {};
+      parsed.error.issues.forEach((issue) => {
+        const key = issue.path[0] as string;
+        if (key && !errMap[key]) {
+          errMap[key] = issue.message;
+        }
+      });
+      setAccountErrors(errMap);
       return;
     }
     setIsSubmitting(true);
@@ -180,7 +203,13 @@ export function AccountsTable({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...newAccount,
+          company_id: parsed.data.company_id,
+          bank_id: parsed.data.bank_id,
+          account_alias: parsed.data.account_alias,
+          account_number: parsed.data.account_number,
+          terminal_code: parsed.data.terminal_code,
+          currency: parsed.data.currency,
+          account_type: parsed.data.account_type,
           initial_balance: parseFloat(newAccount.initial_balance.replace(",", ".")) || 0,
         }),
       });
@@ -190,6 +219,7 @@ export function AccountsTable({
       }
       toast.success("Cuenta bancaria creada exitosamente");
       setIsModalOpen(false);
+      setAccountErrors({});
       setNewAccount({
         company_id: "",
         bank_id: "",
@@ -197,7 +227,7 @@ export function AccountsTable({
         account_number: "",
         terminal_code: "",
         currency: "VES",
-        account_type: "Corriente",
+        account_type: "CORRIENTE",
         initial_balance: "0",
       });
       onAccountCreated();
@@ -210,12 +240,25 @@ export function AccountsTable({
 
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCompanyErrors({});
+    const parsed = companySchema.safeParse(newCompany);
+    if (!parsed.success) {
+      const errMap: Record<string, string> = {};
+      parsed.error.issues.forEach((issue) => {
+        const key = issue.path[0] as string;
+        if (key && !errMap[key]) {
+          errMap[key] = issue.message;
+        }
+      });
+      setCompanyErrors(errMap);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const res = await fetchClient("/api/v1/treasury/companies", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newCompany),
+        body: JSON.stringify(parsed.data),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -223,6 +266,7 @@ export function AccountsTable({
       }
       toast.success("Empresa creada exitosamente");
       setIsCompanyModalOpen(false);
+      setCompanyErrors({});
       setNewCompany({ code: "", name: "", rif: "" });
       onCompanyCreated();
     } catch (err: unknown) {
@@ -234,12 +278,25 @@ export function AccountsTable({
 
   const handleCreateBank = async (e: React.FormEvent) => {
     e.preventDefault();
+    setBankErrors({});
+    const parsed = bankSchema.safeParse(newBank);
+    if (!parsed.success) {
+      const errMap: Record<string, string> = {};
+      parsed.error.issues.forEach((issue) => {
+        const key = issue.path[0] as string;
+        if (key && !errMap[key]) {
+          errMap[key] = issue.message;
+        }
+      });
+      setBankErrors(errMap);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const res = await fetchClient("/api/v1/treasury/banks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newBank),
+        body: JSON.stringify(parsed.data),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -247,6 +304,7 @@ export function AccountsTable({
       }
       toast.success("Banco creado exitosamente");
       setIsBankModalOpen(false);
+      setBankErrors({});
       setNewBank({ code: "", name: "", is_cash: false });
       onBankCreated();
     } catch (err: unknown) {
@@ -599,7 +657,10 @@ export function AccountsTable({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-sm">
           <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
             <button
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => {
+                setIsModalOpen(false);
+                setAccountErrors({});
+              }}
               className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -616,15 +677,21 @@ export function AccountsTable({
                     Empresa *
                   </label>
                   <select
-                    required
                     value={newAccount.company_id}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setNewAccount({
                         ...newAccount,
                         company_id: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                      });
+                      if (accountErrors.company_id) {
+                        setAccountErrors((prev) => ({ ...prev, company_id: "" }));
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                      accountErrors.company_id
+                        ? "border-rose-500 focus:ring-rose-500/30"
+                        : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   >
                     <option value="">Seleccione...</option>
                     {companies.map((c) => (
@@ -633,6 +700,9 @@ export function AccountsTable({
                       </option>
                     ))}
                   </select>
+                  {accountErrors.company_id && (
+                    <p className="text-rose-600 text-xs mt-1">{accountErrors.company_id}</p>
+                  )}
                 </div>
 
                 <div>
@@ -640,20 +710,29 @@ export function AccountsTable({
                     Banco *
                   </label>
                   <select
-                    required
                     value={newAccount.bank_id}
-                    onChange={(e) =>
-                      setNewAccount({ ...newAccount, bank_id: e.target.value })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                    onChange={(e) => {
+                      setNewAccount({ ...newAccount, bank_id: e.target.value });
+                      if (accountErrors.bank_id) {
+                        setAccountErrors((prev) => ({ ...prev, bank_id: "" }));
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                      accountErrors.bank_id
+                        ? "border-rose-500 focus:ring-rose-500/30"
+                        : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   >
                     <option value="">Seleccione...</option>
                     {banks.map((b) => (
                       <option key={b.id} value={b.id}>
-                        {b.name}
+                        {b.name} {b.is_cash ? "(Caja/Efectivo)" : ""}
                       </option>
                     ))}
                   </select>
+                  {accountErrors.bank_id && (
+                    <p className="text-rose-600 text-xs mt-1">{accountErrors.bank_id}</p>
+                  )}
                 </div>
               </div>
 
@@ -664,17 +743,26 @@ export function AccountsTable({
                   </label>
                   <input
                     type="text"
-                    required
                     placeholder="Ej. Banesco Operativa"
                     value={newAccount.account_alias}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setNewAccount({
                         ...newAccount,
                         account_alias: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                      });
+                      if (accountErrors.account_alias) {
+                        setAccountErrors((prev) => ({ ...prev, account_alias: "" }));
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                      accountErrors.account_alias
+                        ? "border-rose-500 focus:ring-rose-500/30"
+                        : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   />
+                  {accountErrors.account_alias && (
+                    <p className="text-rose-600 text-xs mt-1">{accountErrors.account_alias}</p>
+                  )}
                 </div>
 
                 <div>
@@ -683,17 +771,26 @@ export function AccountsTable({
                   </label>
                   <input
                     type="text"
-                    required
                     placeholder="Ej. 1001 / BNS-01"
                     value={newAccount.terminal_code}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setNewAccount({
                         ...newAccount,
                         terminal_code: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                      });
+                      if (accountErrors.terminal_code) {
+                        setAccountErrors((prev) => ({ ...prev, terminal_code: "" }));
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                      accountErrors.terminal_code
+                        ? "border-rose-500 focus:ring-rose-500/30"
+                        : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   />
+                  {accountErrors.terminal_code && (
+                    <p className="text-rose-600 text-xs mt-1">{accountErrors.terminal_code}</p>
+                  )}
                 </div>
               </div>
 
@@ -703,16 +800,29 @@ export function AccountsTable({
                 </label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  maxLength={20}
                   placeholder="0134..."
                   value={newAccount.account_number}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, "");
                     setNewAccount({
                       ...newAccount,
-                      account_number: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                      account_number: val,
+                    });
+                    if (accountErrors.account_number) {
+                      setAccountErrors((prev) => ({ ...prev, account_number: "" }));
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                    accountErrors.account_number
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
+                {accountErrors.account_number && (
+                  <p className="text-rose-600 text-xs mt-1">{accountErrors.account_number}</p>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -722,33 +832,55 @@ export function AccountsTable({
                   </label>
                   <select
                     value={newAccount.currency}
-                    onChange={(e) =>
-                      setNewAccount({ ...newAccount, currency: e.target.value })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                    onChange={(e) => {
+                      setNewAccount({ ...newAccount, currency: e.target.value });
+                      if (accountErrors.currency) {
+                        setAccountErrors((prev) => ({ ...prev, currency: "" }));
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                      accountErrors.currency
+                        ? "border-rose-500 focus:ring-rose-500/30"
+                        : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   >
                     <option value="VES">VES</option>
                     <option value="USD">USD</option>
                     <option value="EUR">EUR</option>
                   </select>
+                  {accountErrors.currency && (
+                    <p className="text-rose-600 text-xs mt-1">{accountErrors.currency}</p>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1">
                     Tipo de Cuenta *
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <select
                     value={newAccount.account_type}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setNewAccount({
                         ...newAccount,
                         account_type: e.target.value,
-                      })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
-                  />
+                      });
+                      if (accountErrors.account_type) {
+                        setAccountErrors((prev) => ({ ...prev, account_type: "" }));
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                      accountErrors.account_type
+                        ? "border-rose-500 focus:ring-rose-500/30"
+                        : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                  >
+                    <option value="CORRIENTE">CORRIENTE</option>
+                    <option value="AHORRO">AHORRO</option>
+                    <option value="CUSTODIA">CUSTODIA</option>
+                  </select>
+                  {accountErrors.account_type && (
+                    <p className="text-rose-600 text-xs mt-1">{accountErrors.account_type}</p>
+                  )}
                 </div>
 
                 <div>
@@ -769,7 +901,7 @@ export function AccountsTable({
                         });
                       }
                     }}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40"
                   />
                 </div>
               </div>
@@ -777,7 +909,10 @@ export function AccountsTable({
               <div className="flex justify-end gap-2 pt-4">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={() => {
+                    setIsModalOpen(false);
+                    setAccountErrors({});
+                  }}
                   className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer"
                 >
                   Cancelar
@@ -799,7 +934,10 @@ export function AccountsTable({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-sm">
           <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
-              onClick={() => setIsCompanyModalOpen(false)}
+              onClick={() => {
+                setIsCompanyModalOpen(false);
+                setCompanyErrors({});
+              }}
               className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -817,14 +955,23 @@ export function AccountsTable({
                 </label>
                 <input
                   type="text"
-                  required
                   placeholder="Ej. LOC-01"
                   value={newCompany.code}
-                  onChange={(e) =>
-                    setNewCompany({ ...newCompany, code: e.target.value })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                  onChange={(e) => {
+                    setNewCompany({ ...newCompany, code: e.target.value });
+                    if (companyErrors.code) {
+                      setCompanyErrors((prev) => ({ ...prev, code: "" }));
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                    companyErrors.code
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
+                {companyErrors.code && (
+                  <p className="text-rose-600 text-xs mt-1">{companyErrors.code}</p>
+                )}
               </div>
 
               <div>
@@ -833,14 +980,23 @@ export function AccountsTable({
                 </label>
                 <input
                   type="text"
-                  required
                   placeholder="Ej. Locatel Servicios C.A."
                   value={newCompany.name}
-                  onChange={(e) =>
-                    setNewCompany({ ...newCompany, name: e.target.value })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                  onChange={(e) => {
+                    setNewCompany({ ...newCompany, name: e.target.value });
+                    if (companyErrors.name) {
+                      setCompanyErrors((prev) => ({ ...prev, name: "" }));
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                    companyErrors.name
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
+                {companyErrors.name && (
+                  <p className="text-rose-600 text-xs mt-1">{companyErrors.name}</p>
+                )}
               </div>
 
               <div>
@@ -849,20 +1005,32 @@ export function AccountsTable({
                 </label>
                 <input
                   type="text"
-                  required
                   placeholder="Ej. J-12345678-9"
                   value={newCompany.rif}
-                  onChange={(e) =>
-                    setNewCompany({ ...newCompany, rif: e.target.value })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                  onChange={(e) => {
+                    setNewCompany({ ...newCompany, rif: e.target.value });
+                    if (companyErrors.rif) {
+                      setCompanyErrors((prev) => ({ ...prev, rif: "" }));
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                    companyErrors.rif
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
+                {companyErrors.rif && (
+                  <p className="text-rose-600 text-xs mt-1">{companyErrors.rif}</p>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-4">
                 <button
                   type="button"
-                  onClick={() => setIsCompanyModalOpen(false)}
+                  onClick={() => {
+                    setIsCompanyModalOpen(false);
+                    setCompanyErrors({});
+                  }}
                   className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer"
                 >
                   Cancelar
@@ -884,7 +1052,10 @@ export function AccountsTable({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-sm">
           <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
-              onClick={() => setIsBankModalOpen(false)}
+              onClick={() => {
+                setIsBankModalOpen(false);
+                setBankErrors({});
+              }}
               className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -902,13 +1073,26 @@ export function AccountsTable({
                 </label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  maxLength={4}
                   placeholder="Ej. 0134"
                   value={newBank.code}
-                  onChange={(e) =>
-                    setNewBank({ ...newBank, code: e.target.value })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, "");
+                    setNewBank({ ...newBank, code: val });
+                    if (bankErrors.code) {
+                      setBankErrors((prev) => ({ ...prev, code: "" }));
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                    bankErrors.code
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
+                {bankErrors.code && (
+                  <p className="text-rose-600 text-xs mt-1">{bankErrors.code}</p>
+                )}
               </div>
 
               <div>
@@ -917,14 +1101,23 @@ export function AccountsTable({
                 </label>
                 <input
                   type="text"
-                  required
                   placeholder="Ej. Banesco Banco Universal"
                   value={newBank.name}
-                  onChange={(e) =>
-                    setNewBank({ ...newBank, name: e.target.value })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+                  onChange={(e) => {
+                    setNewBank({ ...newBank, name: e.target.value });
+                    if (bankErrors.name) {
+                      setBankErrors((prev) => ({ ...prev, name: "" }));
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
+                    bankErrors.name
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
+                {bankErrors.name && (
+                  <p className="text-rose-600 text-xs mt-1">{bankErrors.name}</p>
+                )}
               </div>
 
               <div className="flex items-center gap-2 pt-2">
@@ -948,7 +1141,10 @@ export function AccountsTable({
               <div className="flex justify-end gap-2 pt-4">
                 <button
                   type="button"
-                  onClick={() => setIsBankModalOpen(false)}
+                  onClick={() => {
+                    setIsBankModalOpen(false);
+                    setBankErrors({});
+                  }}
                   className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer"
                 >
                   Cancelar

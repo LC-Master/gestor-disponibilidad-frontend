@@ -13,23 +13,22 @@ import {
   History,
   Plus,
   RefreshCw,
-  RotateCcw,
   Search,
   Send,
   ShieldCheck,
   Trash2,
-  Wallet,
   X,
   XCircle,
 } from "lucide-react";
+
 import { toast } from "sonner";
 import { fetchClient } from "@/lib/fetchClient";
-import { Company, DailyAvailability } from "@/app/(app)/tesoreria/types";
-import { Invoice, InvoiceStatus, InvoiceType, SAPDocumentType, Supplier } from "../types";
+import { Company } from "@/app/(app)/tesoreria/types";
+import { CxpAvailability, Invoice, InvoiceStatus, InvoiceType, SAPDocumentType, Supplier } from "../types";
 import { CreateInvoiceModal } from "./CreateInvoiceModal";
 import { CreateProposalModal } from "./CreateProposalModal";
-import { ExecutePaymentModal } from "./ExecutePaymentModal";
 import { InvoiceAuditTrailModal } from "./InvoiceAuditTrailModal";
+
 
 interface UserProfile {
   id: string;
@@ -64,7 +63,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
     return searchParams?.get("date") || new Date().toISOString().split("T")[0];
   });
 
-  const [availability, setAvailability] = useState<DailyAvailability | null>(null);
+  const [cxpAvailability, setCxpAvailability] = useState<CxpAvailability | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [proposedIdsCount, setProposedIdsCount] = useState<number>(0);
 
@@ -75,10 +74,8 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
 
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
   const [selectedInvoiceAudit, setSelectedInvoiceAudit] = useState<Invoice | null>(null);
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [invoicesToPay, setInvoicesToPay] = useState<Invoice[]>([]);
-  const [isUnprogramming, setIsUnprogramming] = useState(false);
   const [isCreateProposalModalOpen, setIsCreateProposalModalOpen] = useState(false);
+
 
   const hasPermission = (code: string) => {
     const clean = code.toLowerCase().trim();
@@ -143,7 +140,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
       if (dateTo) {
         params.append("date_to", dateTo);
       }
-
+      params.append("scope", "pending");
       const res = await fetchClient(`/api/cxp/invoices?${params.toString()}`);
       if (!res.ok) {
         throw new Error("Error al obtener la lista de facturas");
@@ -200,48 +197,24 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
     }
   };
 
-  const [programmedTotalVES, setProgrammedTotalVES] = useState<number>(0);
-
   const fetchAvailability = async () => {
     if (!selectedCompanyId || selectedCompanyId === "ALL") {
-      setAvailability(null);
-      setProgrammedTotalVES(0);
+      setCxpAvailability(null);
       return;
     }
     setLoadingAvailability(true);
     try {
-      const [availRes, progRes] = await Promise.all([
-        fetchClient(
-          `/api/treasury/availabilities?company_id=${selectedCompanyId}&date=${selectedDate}`
-        ),
-        fetchClient(
-          `/api/cxp/invoices?company_id=${selectedCompanyId}&status=PROGRAMADO`
-        ),
-      ]);
-      if (availRes.ok) {
-        const data = await availRes.json();
-        setAvailability(data && data.id ? data : null);
+      const res = await fetchClient(
+        `/api/cxp/availability?company_id=${selectedCompanyId}&date=${selectedDate}`
+      );
+      if (res.ok) {
+        const data: CxpAvailability = await res.json();
+        setCxpAvailability(data);
       } else {
-        setAvailability(null);
-      }
-
-      if (progRes.ok) {
-        const progData: Invoice[] = await progRes.json();
-        if (Array.isArray(progData)) {
-          const total = progData.reduce((sum, inv) => {
-            const rem = inv.total_amount - inv.paid_amount;
-            if (inv.currency === "VES") return sum + rem;
-            const rate = (availability?.exchange_rate && availability.exchange_rate > 0)
-              ? availability.exchange_rate
-              : (inv.exchange_rate || 1);
-            return sum + rem * rate;
-          }, 0);
-          setProgrammedTotalVES(total);
-        }
+        setCxpAvailability(null);
       }
     } catch {
-      setAvailability(null);
-      setProgrammedTotalVES(0);
+      setCxpAvailability(null);
     } finally {
       setLoadingAvailability(false);
     }
@@ -267,28 +240,21 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
     setProposedIdsCount(0);
   }, [selectedCompanyId]);
 
-  const hasTreasuryApproved = availability?.status === "APROBADO";
-  const supplierAmount = hasTreasuryApproved ? (availability?.supplier_amount || 0) : 0;
-  const exchangeRate = availability?.exchange_rate || 1;
-
-  const cupoConsumido = programmedTotalVES;
-  const cupoDisponible = Math.max(0, supplierAmount - cupoConsumido);
-
-  const selectedInvoicesList = useMemo(() => {
-    return invoices.filter((inv) => selectedInvoiceIds.has(inv.id));
-  }, [invoices, selectedInvoiceIds]);
+  const hasApprovedToday = cxpAvailability?.has_approved_today ?? false;
+  const isRollover = cxpAvailability?.is_rollover ?? false;
+  const rolloverDate = cxpAvailability?.rollover_date;
+  const supplierAmount = Math.max(0, cxpAvailability?.supplier_amount ?? 0);
+  const cupoConsumido = Math.max(0, cxpAvailability?.cupo_consumido ?? 0);
+  const cupoLibre = Math.max(0, cxpAvailability?.cupo_libre ?? 0);
+  const exchangeRate = cxpAvailability?.exchange_rate || 1;
 
   const selectedPending = useMemo(() => {
-    return selectedInvoicesList.filter((inv) => inv.status === "PENDIENTE");
-  }, [selectedInvoicesList]);
-
-  const selectedProgrammed = useMemo(() => {
-    return selectedInvoicesList.filter((inv) => inv.status === "PROGRAMADO");
-  }, [selectedInvoicesList]);
+    return invoices.filter((inv) => selectedInvoiceIds.has(inv.id) && inv.status === "PENDIENTE");
+  }, [invoices, selectedInvoiceIds]);
 
   const selectedPendingAmountVES = useMemo(() => {
     return selectedPending.reduce((sum, inv) => {
-      const remaining = inv.total_amount - inv.paid_amount;
+      const remaining = inv.total_amount - (inv.paid_amount || 0);
       if (inv.currency === "VES") return sum + remaining;
       const rate = exchangeRate > 0 ? exchangeRate : (inv.exchange_rate || 1);
       return sum + remaining * rate;
@@ -297,28 +263,22 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
 
   const selectedPendingAmountUSD = useMemo(() => {
     return selectedPending.reduce((sum, inv) => {
-      const remaining = inv.total_amount - inv.paid_amount;
+      const remaining = inv.total_amount - (inv.paid_amount || 0);
       if (inv.currency === "USD") return sum + remaining;
       const rate = exchangeRate > 0 ? exchangeRate : (inv.exchange_rate || 1);
       return sum + (rate > 0 ? remaining / rate : 0);
     }, 0);
   }, [selectedPending, exchangeRate]);
 
-  const isWithinQuota = selectedPendingAmountVES <= cupoDisponible && cupoDisponible > 0 && hasTreasuryApproved;
+  const isWithinQuota = selectedPendingAmountVES <= cupoLibre && cupoLibre > 0 && (hasApprovedToday || isRollover);
 
   const canSelectRow = (inv: Invoice) => {
-    if (inv.status === "PENDIENTE") {
-      return canCreateProposal;
-    }
-    if (inv.status === "PROGRAMADO") {
-      return canExecutePayment || canRevert;
-    }
-    return false;
+    return inv.status === "PENDIENTE" && canCreateProposal;
   };
 
   const selectableInvoices = useMemo(() => {
     return invoices.filter((inv) => canSelectRow(inv));
-  }, [invoices, canCreateProposal, canExecutePayment, canRevert]);
+  }, [invoices, canCreateProposal]);
 
   const toggleSelectInvoice = (id: string) => {
     setSelectedInvoiceIds((prev) => {
@@ -356,78 +316,6 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
     } catch { }
   };
 
-  const handleUnprogramSingle = async (id: string) => {
-    setIsUnprogramming(true);
-    try {
-      const res = await fetchClient(`/api/cxp/invoices/${id}/unprogram`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "Error al desprogramar factura");
-      }
-      toast.success("Factura desprogramada exitosamente y cupo restituido");
-      fetchInvoices();
-    } catch (err: any) {
-      toast.error(err.message || "Error al desprogramar");
-    } finally {
-      setIsUnprogramming(false);
-    }
-  };
-
-  const handleUnprogramBatch = async () => {
-    const programmedIds = invoices
-      .filter((inv) => selectedInvoiceIds.has(inv.id) && inv.status === "PROGRAMADO")
-      .map((inv) => inv.id);
-
-    if (programmedIds.length === 0) {
-      toast.error("Seleccione al menos una factura en estado PROGRAMADO");
-      return;
-    }
-
-    setIsUnprogramming(true);
-    try {
-      const res = await fetchClient("/api/cxp/invoices/unprogram-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoice_ids: programmedIds }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || "Error al desprogramar facturas");
-      }
-      toast.success(`${programmedIds.length} facturas desprogramadas y cupo restituido`);
-      setSelectedInvoiceIds(new Set());
-      fetchInvoices();
-    } catch (err: any) {
-      toast.error(err.message || "Error al desprogramar en lote");
-    } finally {
-      setIsUnprogramming(false);
-    }
-  };
-
-  const handleOpenPaymentSingle = (inv: Invoice) => {
-    setInvoicesToPay([inv]);
-    setIsPaymentModalOpen(true);
-  };
-
-  const handleOpenPaymentBatch = () => {
-    const programmedInvoices = invoices.filter(
-      (inv) => selectedInvoiceIds.has(inv.id) && inv.status === "PROGRAMADO"
-    );
-    if (programmedInvoices.length === 0) {
-      toast.error("Seleccione al menos una factura en estado PROGRAMADO");
-      return;
-    }
-    const companyId = programmedInvoices[0].company_id;
-    const allSameCompany = programmedInvoices.every((i) => i.company_id === companyId);
-    if (!allSameCompany) {
-      toast.error("Todas las facturas a liquidar en un lote deben pertenecer a la misma empresa");
-      return;
-    }
-    setInvoicesToPay(programmedInvoices);
-    setIsPaymentModalOpen(true);
-  };
 
   const isOverdue = (dueDateStr: string, status: InvoiceStatus): boolean => {
     if (status !== "PENDIENTE") return false;
@@ -570,15 +458,20 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
               <RefreshCw className="w-3.5 h-3.5 animate-spin text-locatel-medio" />
               Consultando Tesorería...
             </span>
-          ) : hasTreasuryApproved ? (
+          ) : hasApprovedToday ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
               Tesorería Aprobada
             </span>
-          ) : (
+          ) : isRollover ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-              <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-              No existe cierre de Tesorería aprobado para la fecha seleccionada
+              <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              Operando con Remanente del {formatDate(rolloverDate || "")} (Cierre de hoy pendiente)
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+              Sin disponibilidad de Tesorería
             </span>
           )}
 
@@ -597,7 +490,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
         <div className="grid grid-cols-3 gap-3 shrink-0">
           <div className="px-3.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200/60 dark:border-neutral-700/60">
             <span className="text-[10px] uppercase font-bold text-neutral-400 block">
-              Cupo Proveedores
+              Cupo Disponible
             </span>
             <span className="text-xs font-extrabold font-mono text-neutral-900 dark:text-neutral-100">
               Bs. {formatMoney(supplierAmount, "VES")}
@@ -614,20 +507,21 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
           </div>
 
           <div
-            className={`px-3.5 py-2 rounded-xl border ${cupoDisponible > 0 && hasTreasuryApproved
+            className={`px-3.5 py-2 rounded-xl border ${cupoLibre > 0 && (hasApprovedToday || isRollover)
                 ? "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
-                : "bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300"
+                : "bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300"
               }`}
           >
             <span className="text-[10px] uppercase font-bold opacity-80 block">
-              Cupo Libre Disponible
+              Cupo Libre
             </span>
             <span className="text-xs font-extrabold font-mono">
-              Bs. {formatMoney(cupoDisponible, "VES")}
+              Bs. {formatMoney(cupoLibre, "VES")}
             </span>
           </div>
         </div>
       </div>
+
 
       <div className="bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -692,12 +586,11 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
               onChange={(e) => setSelectedStatus(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40 cursor-pointer"
             >
-              <option value="TODOS">Todos los Estatus</option>
+              <option value="TODOS">Todas las Pendientes</option>
               <option value="PENDIENTE">Pendiente</option>
-              <option value="PROGRAMADO">Programado</option>
-              <option value="PAGADO">Pagado</option>
-              <option value="ANULADO">Anulado</option>
+              <option value="EN_PROPUESTA">En Propuesta</option>
             </select>
+
           </div>
 
           <div>
@@ -765,17 +658,17 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                   ≈ ${formatMoney(selectedPendingAmountUSD, "USD")}
                 </span>
                 {selectedCompanyId !== "ALL" && (
-                  !hasTreasuryApproved ? (
+                  (!hasApprovedToday && !isRollover) ? (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                       Sin Cierre de Tesorería Aprobado
                     </span>
                   ) : isWithinQuota ? (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Dentro de Cupo Libre (Resta: Bs. {formatMoney(cupoDisponible - selectedPendingAmountVES, "VES")})
+                      Dentro de Cupo Libre (Resta: Bs. {formatMoney(cupoLibre - selectedPendingAmountVES, "VES")})
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/30">
-                      Excede Cupo Libre por Bs. {formatMoney(selectedPendingAmountVES - cupoDisponible, "VES")}
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                      Excede Cupo Libre por Bs. {formatMoney(selectedPendingAmountVES - cupoLibre, "VES")}
                     </span>
                   )
                 )}
@@ -795,26 +688,6 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
               </button>
             )}
 
-            {selectedProgrammed.length > 0 && canExecutePayment && (
-              <button
-                onClick={handleOpenPaymentBatch}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-              >
-                <Wallet className="w-3.5 h-3.5" />
-                <span>Liquidar / Registrar Pago Bancario</span>
-              </button>
-            )}
-
-            {selectedProgrammed.length > 0 && canRevert && (
-              <button
-                onClick={handleUnprogramBatch}
-                disabled={isUnprogramming}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <RotateCcw className={`w-3.5 h-3.5 ${isUnprogramming ? "animate-spin" : ""}`} />
-                <span>Desprogramar Lote</span>
-              </button>
-            )}
 
             <button
               onClick={() => setSelectedInvoiceIds(new Set())}
@@ -952,27 +825,9 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                       </td>
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {canExecutePayment && inv.status === "PROGRAMADO" && (
-                            <button
-                              onClick={() => handleOpenPaymentSingle(inv)}
-                              className="p-1.5 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer"
-                              title="Liquidar pago"
-                            >
-                              <CheckCircle2 className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canRevert && inv.status === "PROGRAMADO" && (
-                            <button
-                              onClick={() => handleUnprogramSingle(inv.id)}
-                              disabled={isUnprogramming}
-                              className="p-1.5 rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors cursor-pointer"
-                              title="Desprogramar y restituir cupo"
-                            >
-                              <RotateCcw className="w-4 h-4" />
-                            </button>
-                          )}
                           <button
                             onClick={() => setSelectedInvoiceAudit(inv)}
+
                             className="p-1.5 rounded-lg text-teal-600 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition-colors cursor-pointer"
                             title="Ver trazabilidad y bitácora de auditoría"
                           >
@@ -1198,33 +1053,13 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
         invoice={selectedInvoiceAudit}
       />
 
-      <ExecutePaymentModal
-        isOpen={isPaymentModalOpen}
-        onClose={() => {
-          setIsPaymentModalOpen(false);
-          setInvoicesToPay([]);
-        }}
-        invoices={invoicesToPay}
-        companyId={
-          invoicesToPay.length > 0
-            ? invoicesToPay[0].company_id
-            : selectedCompanyId !== "ALL"
-              ? selectedCompanyId
-              : companies[0]?.id || ""
-        }
-        onSuccess={() => {
-          setSelectedInvoiceIds(new Set());
-          fetchInvoices();
-        }}
-      />
-
       <CreateProposalModal
         isOpen={isCreateProposalModalOpen}
         onClose={() => setIsCreateProposalModalOpen(false)}
         selectedInvoices={selectedPending}
         companies={companies}
         selectedCompanyId={selectedCompanyId}
-        exchangeRate={availability?.exchange_rate}
+        exchangeRate={cxpAvailability?.exchange_rate}
         onSuccess={() => {
           setSelectedInvoiceIds(new Set());
           fetchInvoices();
@@ -1233,6 +1068,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
     </div>
   );
 }
+
 
 export function InvoicesTableView(props: InvoicesTableViewProps) {
   return (
