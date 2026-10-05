@@ -3,7 +3,6 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  AlertTriangle,
   CheckCircle2,
   Eye,
   History,
@@ -16,7 +15,7 @@ import {
 import { toast } from "sonner";
 import { fetchClient } from "@/lib/fetchClient";
 import { Company } from "@/app/(app)/tesoreria/types";
-import { Invoice, InvoiceStatus, InvoiceType, SAPDocumentType } from "../types";
+import { Invoice, InvoiceType, SAPDocumentType } from "../types";
 import { ExecutePaymentModal } from "./ExecutePaymentModal";
 import { InvoiceAuditTrailModal } from "./InvoiceAuditTrailModal";
 
@@ -188,10 +187,10 @@ function ScheduledInvoicesContent({ companies, user }: ScheduledInvoicesTableVie
 
     setIsUnprogramming(true);
     try {
-      const res = await fetchClient("/api/cxp/invoices/unprogram-batch", {
+      const res = await fetchClient("/api/cxp/invoices/unprogram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ invoice_ids: ids }),
+        body: JSON.stringify({ invoice_ids: ids, ids: ids }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -488,11 +487,10 @@ function ScheduledInvoicesContent({ companies, user }: ScheduledInvoicesTableVie
                   return (
                     <tr
                       key={inv.id}
-                      className={`hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40 transition-colors ${
-                        isSelected
+                      className={`hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40 transition-colors ${isSelected
                           ? "bg-violet-50/40 dark:bg-violet-950/20"
                           : ""
-                      }`}
+                        }`}
                     >
                       <td className="py-3.5 px-3 text-center">
                         <input

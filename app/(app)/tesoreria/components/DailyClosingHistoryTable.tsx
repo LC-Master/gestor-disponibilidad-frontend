@@ -208,7 +208,7 @@ export function DailyClosingHistoryTable({
                     Comprometido
                   </th>
                   <th className="px-3.5 py-3 font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider text-right">
-                    Remanente (Resta)
+                    Saldo Sin Asignar
                   </th>
                   <th className="px-3 py-3 font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider text-center">
                     Estado

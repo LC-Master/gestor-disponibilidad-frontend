@@ -819,7 +819,7 @@ export function DailyClosingMatrix({
               </div>
 
               <div className="flex items-baseline gap-1.5">
-                <span className="text-[11px] font-sans text-neutral-400">Remanente:</span>
+                <span className="text-[11px] font-sans text-neutral-400">Sin Asignar:</span>
                 <span
                   className={`font-bold ${isOverLimit ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"
                     }`}

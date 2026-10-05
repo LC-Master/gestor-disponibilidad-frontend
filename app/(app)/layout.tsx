@@ -51,6 +51,9 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
     if (pathname.startsWith("/usuarios")) {
       return "Administración - Control de Usuarios";
     }
+    if (pathname.startsWith("/perfil")) {
+      return "Mi Perfil y Configuración";
+    }
     return "Gestor de Facturación";
   };
 

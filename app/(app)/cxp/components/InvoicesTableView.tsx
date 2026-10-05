@@ -490,7 +490,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
         <div className="grid grid-cols-3 gap-3 shrink-0">
           <div className="px-3.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200/60 dark:border-neutral-700/60">
             <span className="text-[10px] uppercase font-bold text-neutral-400 block">
-              Cupo Disponible
+              {hasApprovedToday ? "Asignado Hoy" : isRollover ? "Remanente Rollover" : "Cupo Asignado"}
             </span>
             <span className="text-xs font-extrabold font-mono text-neutral-900 dark:text-neutral-100">
               Bs. {formatMoney(supplierAmount, "VES")}
@@ -499,7 +499,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
 
           <div className="px-3.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200/60 dark:border-neutral-700/60">
             <span className="text-[10px] uppercase font-bold text-neutral-400 block">
-              Cupo Consumido
+              {hasApprovedToday ? "Consumido Hoy" : "Cupo Consumido"}
             </span>
             <span className="text-xs font-extrabold font-mono text-amber-600 dark:text-amber-400">
               Bs. {formatMoney(cupoConsumido, "VES")}
@@ -513,7 +513,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
               }`}
           >
             <span className="text-[10px] uppercase font-bold opacity-80 block">
-              Cupo Libre
+              {hasApprovedToday ? "Cupo Libre Hoy" : "Cupo Libre"}
             </span>
             <span className="text-xs font-extrabold font-mono">
               Bs. {formatMoney(cupoLibre, "VES")}
