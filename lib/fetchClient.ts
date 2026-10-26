@@ -8,7 +8,13 @@ let pendingRequestsQueue: Array<{
 export function getStoredAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return localStorage.getItem("access_token") || null;
+    const token = localStorage.getItem("access_token");
+    if (token) return token;
+    const sessionToken = sessionStorage.getItem("access_token");
+    if (sessionToken) return sessionToken;
+    const match = document.cookie.match(/(?:^|;\s*)(?:access_token|token)=([^;]+)/);
+    if (match) return decodeURIComponent(match[1]);
+    return null;
   } catch {
     return null;
   }
@@ -26,7 +32,13 @@ export function setStoredAccessToken(token: string) {
 export function getStoredRefreshToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return localStorage.getItem("refresh_token") || null;
+    const token = localStorage.getItem("refresh_token");
+    if (token) return token;
+    const sessionToken = sessionStorage.getItem("refresh_token");
+    if (sessionToken) return sessionToken;
+    const match = document.cookie.match(/(?:^|;\s*)refresh_token=([^;]+)/);
+    if (match) return decodeURIComponent(match[1]);
+    return null;
   } catch {
     return null;
   }

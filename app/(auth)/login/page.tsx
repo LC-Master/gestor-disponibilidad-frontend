@@ -74,7 +74,18 @@ export default function LoginPage() {
                 localStorage.setItem("refresh_token", resData.refresh_token);
             }
 
-            window.location.href = "/tesoreria";
+            const roles = ((resData?.user?.roles as string[]) || []).map((r) => r.toUpperCase());
+            const perms = ((resData?.user?.permissions as string[]) || []).map((p) => p.toLowerCase());
+            const hasTreasury = roles.includes("ADMIN") || roles.includes("COORD_TESORERIA") || roles.includes("ANALISTA_TESORERIA") || perms.some((p) => p.startsWith("treasury."));
+            const hasCxp = roles.includes("COORD_CXP") || roles.includes("ANALISTA_CXP") || perms.some((p) => p.startsWith("cxp."));
+
+            if (hasTreasury) {
+                window.location.href = "/tesoreria";
+            } else if (hasCxp) {
+                window.location.href = "/cxp/facturas";
+            } else {
+                window.location.href = "/perfil";
+            }
         } catch (err: unknown) {
             if (err instanceof Error) {
                 setErrorMessage(err.message);
@@ -93,7 +104,7 @@ export default function LoginPage() {
                         Iniciar Sesión
                     </h1>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                        Gestor de Facturación • Pasivos y Tesorería
+                        Gestor de Disponibilidad • Pasivos y Tesorería
                     </p>
                 </div>
 

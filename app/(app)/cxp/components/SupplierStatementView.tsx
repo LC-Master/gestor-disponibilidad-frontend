@@ -251,7 +251,7 @@ export function SupplierStatementView({
                       </td>
                       <td className="py-3 px-4">
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
-                          {inv.invoice_type}
+                          {inv.supplier?.supplier_type || "FIRME"}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-neutral-900 dark:text-neutral-100">

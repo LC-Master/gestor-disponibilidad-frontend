@@ -40,44 +40,39 @@ export default function RegisterPage() {
 
     useEffect(() => {
         const fetchRoles = async () => {
+            const fallbackRoles: RoleOption[] = [
+                { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería" },
+                { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar" },
+                { name: "COORD_TESORERIA", display_name: "Coordinador de Tesorería" },
+                { name: "COORD_CXP", display_name: "Coordinador de Cuentas por Pagar" },
+            ];
+
             try {
                 const res = await fetch("/api/v1/roles");
                 if (res.ok) {
                     const data: RoleOption[] = await res.json();
-                    const filtered = data.filter((r) => {
-                        const u = r.name.toUpperCase().trim();
-                        return u !== "ADMIN" && u !== "ADMINISTRADOR" && !u.startsWith("COORD_");
-                    });
-                    if (filtered.length > 0) {
-                        setRoles(filtered);
-                        setValue("role", filtered[0].name);
+                    if (Array.isArray(data) && data.length > 0) {
+                        // En registro público no se puede seleccionar ADMIN
+                        const filtered = data.filter((r) => !r.name.toUpperCase().includes("ADMIN"));
+                        const finalRoles = filtered.length > 0 ? filtered : fallbackRoles;
+                        setRoles(finalRoles);
+                        setValue("role", finalRoles[0].name);
                     } else {
-                        const fallbackRoles: RoleOption[] = [
-                            { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería" },
-                            { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar" },
-                        ];
                         setRoles(fallbackRoles);
                         setValue("role", fallbackRoles[0].name);
                     }
                 } else {
-                    const fallbackRoles: RoleOption[] = [
-                        { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería" },
-                        { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar" },
-                    ];
                     setRoles(fallbackRoles);
                     setValue("role", fallbackRoles[0].name);
                 }
-            } catch (err) {
-                const fallbackRoles: RoleOption[] = [
-                    { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería" },
-                    { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar" },
-                ];
+            } catch {
                 setRoles(fallbackRoles);
                 setValue("role", fallbackRoles[0].name);
             } finally {
                 setLoadingRoles(false);
             }
         };
+
         fetchRoles();
     }, [setValue]);
 
@@ -117,6 +112,10 @@ export default function RegisterPage() {
                     if (errorData.errors.email) {
                         const msg = getErrorMsg(errorData.errors.email);
                         if (msg) setError("email", { message: msg });
+                    }
+                    if (errorData.errors.role) {
+                        const msg = getErrorMsg(errorData.errors.role);
+                        if (msg) setError("role", { message: msg });
                     }
                     if (errorData.errors.password) {
                         const msg = getErrorMsg(errorData.errors.password);
@@ -159,7 +158,7 @@ export default function RegisterPage() {
                         Crear Cuenta
                     </h1>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                        Gestor de Facturación • Pasivos y Tesorería
+                        Gestor de Disponibilidad • Pasivos y Tesorería
                     </p>
                 </div>
 
@@ -260,7 +259,7 @@ export default function RegisterPage() {
                         </label>
                         <div className="relative">
                             <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-neutral-400 dark:text-neutral-500">
-                                <ShieldCheck className="w-5 h-5" />
+                                <ShieldCheck className="w-5 h-5 text-locatel-medio" />
                             </div>
                             <select
                                 {...register("role")}
@@ -280,9 +279,6 @@ export default function RegisterPage() {
                                 {errors.role.message}
                             </span>
                         )}
-                        <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1">
-                            Los roles de Coordinación o Administración solo pueden ser asignados o elevados por un Administrador del sistema.
-                        </p>
                     </div>
 
                     <div>

@@ -5,6 +5,7 @@ import {
   Calendar,
   Building2,
   RefreshCw,
+  RotateCcw,
   Search,
   ExternalLink,
   CheckCircle2,
@@ -23,16 +24,36 @@ export function DailyClosingHistoryTable({
 }: DailyClosingHistoryTableProps) {
   const [availabilities, setAvailabilities] = useState<DailyAvailability[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("all");
-  const [startDate, setStartDate] = useState<string>(() => {
+  const getDefaultStartDate = () => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
     return d.toISOString().split("T")[0];
-  });
-  const [endDate, setEndDate] = useState<string>(() => {
+  };
+
+  const getDefaultEndDate = () => {
     return new Date().toISOString().split("T")[0];
-  });
+  };
+
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("all");
+  const [startDate, setStartDate] = useState<string>(getDefaultStartDate);
+  const [endDate, setEndDate] = useState<string>(getDefaultEndDate);
   const [searchTerm, setSearchTerm] = useState("");
+
+  const hasActiveFilters = useMemo(() => {
+    return (
+      selectedCompanyId !== "all" ||
+      searchTerm.trim() !== "" ||
+      startDate !== getDefaultStartDate() ||
+      endDate !== getDefaultEndDate()
+    );
+  }, [selectedCompanyId, searchTerm, startDate, endDate]);
+
+  const handleClearFilters = () => {
+    setSelectedCompanyId("all");
+    setSearchTerm("");
+    setStartDate(getDefaultStartDate());
+    setEndDate(getDefaultEndDate());
+  };
 
   const formatVES = (val: number) => {
     return new Intl.NumberFormat("es-VE", {
@@ -94,85 +115,117 @@ export function DailyClosingHistoryTable({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-locatel-medio" />
-            Histórico de Cierres Diarios y Posición de Disponibilidad
-          </h2>
-          <p className="text-xs text-neutral-500 mt-1">
-            Auditoría, consulta y reedición de posiciones operativas aprobadas por coordinación.
-          </p>
+      <div className="bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+              <Building2 className="w-4 h-4 text-locatel-medio" />
+              Empresa
+            </label>
+            <select
+              value={selectedCompanyId}
+              onChange={(e) => setSelectedCompanyId(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
+            >
+              <option value="all">Todas las Empresas</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.code})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-locatel-medio" />
+              Desde
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-locatel-medio" />
+              Hasta
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
+              <Search className="w-4 h-4 text-locatel-medio" />
+              Buscar
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Filtrar por texto..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 pr-8"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
+                  title="Borrar texto de búsqueda"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
-        <button
-          onClick={loadHistory}
-          disabled={loading}
-          className="flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-          <span>Actualizar</span>
-        </button>
-      </div>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t border-neutral-100 dark:border-neutral-800">
+          <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+            <span>
+              {filteredList.length === 1
+                ? "1 cierre registrado"
+                : `${filteredList.length} cierres registrados`}
+            </span>
+            {hasActiveFilters && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-locatel-medio/10 text-locatel-medio dark:bg-emerald-950/40 dark:text-emerald-400">
+                Filtros aplicados
+              </span>
+            )}
+          </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
-        <div>
-          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
-            <Building2 className="w-4 h-4 text-locatel-medio" />
-            Empresa
-          </label>
-          <select
-            value={selectedCompanyId}
-            onChange={(e) => setSelectedCompanyId(e.target.value)}
-            className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
-          >
-            <option value="all">Todas las Empresas</option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.code})
-              </option>
-            ))}
-          </select>
-        </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              disabled={!hasActiveFilters}
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Restablecer filtros a valores por defecto"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+              <span>Limpiar Filtros</span>
+            </button>
 
-        <div>
-          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
-            <Calendar className="w-4 h-4 text-locatel-medio" />
-            Desde
-          </label>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
-          />
-        </div>
-
-        <div>
-          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
-            <Calendar className="w-4 h-4 text-locatel-medio" />
-            Hasta
-          </label>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
-          />
-        </div>
-
-        <div>
-          <label className="text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1.5 flex items-center gap-1.5">
-            <Search className="w-4 h-4 text-locatel-medio" />
-            Buscar
-          </label>
-          <input
-            type="text"
-            placeholder="Filtrar por texto..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30"
-          />
+            <button
+              type="button"
+              onClick={loadHistory}
+              disabled={loading}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-locatel-medio hover:bg-locatel-oscuro text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              title="Actualizar datos del histórico"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>Actualizar</span>
+            </button>
+          </div>
         </div>
       </div>
 

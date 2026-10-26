@@ -46,6 +46,8 @@ export function ReviewProposalModal({
   const [search, setSearch] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
@@ -55,10 +57,14 @@ export function ReviewProposalModal({
       fetchDetails();
       setShowRejectInput(false);
       setRejectionReason("");
+      setShowCancelModal(false);
+      setCancelReason("");
       setSelectedSupplierId(null);
       setSelectedInvoiceId(null);
     } else {
       setData(null);
+      setShowCancelModal(false);
+      setCancelReason("");
       setSelectedSupplierId(null);
       setSelectedInvoiceId(null);
     }
@@ -68,22 +74,37 @@ export function ReviewProposalModal({
     if (!proposalId) return;
     setLoading(true);
     try {
-      const res = await fetchClient(`/api/cxp/proposals/${proposalId}`);
+      const res = await fetchClient(`/api/v1/cxp/proposals/${proposalId}`);
       if (!res.ok) {
         throw new Error("Error al obtener los detalles de la propuesta");
       }
       const json: ProposalDetailsResponse = await res.json();
       setData(json);
 
-      if (json.proposal?.company_id && json.proposal?.execution_date) {
+      if (!json.daily_availability && json.proposal?.company_id && json.proposal?.execution_date) {
         try {
           const availRes = await fetchClient(
-            `/api/treasury/availabilities?company_id=${json.proposal.company_id}&date=${json.proposal.execution_date}`
+            `/api/v1/cxp/availability?company_id=${json.proposal.company_id}&date=${json.proposal.execution_date}`
           );
           if (availRes.ok) {
             const availData = await availRes.json();
             if (availData) {
-              setData((prev) => (prev ? { ...prev, daily_availability: availData } : null));
+              setData((prev) => (prev ? {
+                ...prev,
+                daily_availability: {
+                  id: "",
+                  company_id: json.proposal.company_id,
+                  availability_date: json.proposal.execution_date,
+                  exchange_rate: availData.exchange_rate,
+                  total_liquidity: 0,
+                  supplier_amount: availData.supplier_amount,
+                  payroll_amount: 0,
+                  tax_amount: 0,
+                  fx_amount: 0,
+                  refund_amount: 0,
+                  status: availData.status,
+                }
+              } : null));
             }
           }
         } catch { }
@@ -155,7 +176,7 @@ export function ReviewProposalModal({
 
     setIsProcessing(true);
     try {
-      const res = await fetchClient(`/api/cxp/proposals/${proposal.id}/approve`, {
+      const res = await fetchClient(`/api/v1/cxp/proposals/${proposal.id}/approve`, {
         method: "POST",
       });
 
@@ -183,7 +204,7 @@ export function ReviewProposalModal({
 
     setIsProcessing(true);
     try {
-      const res = await fetchClient(`/api/cxp/proposals/${proposal.id}/reject`, {
+      const res = await fetchClient(`/api/v1/cxp/proposals/${proposal.id}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: rejectionReason.trim() }),
@@ -199,6 +220,33 @@ export function ReviewProposalModal({
       onClose();
     } catch (err: any) {
       toast.error(err.message || "Error al procesar el rechazo");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!canReview || !proposal) return;
+
+    setIsProcessing(true);
+    try {
+      const res = await fetchClient(`/api/v1/cxp/proposals/${proposal.id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: cancelReason.trim() || undefined }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Error al anular la propuesta");
+      }
+
+      toast.success("Propuesta anulada exitosamente. Facturas devueltas a Pendiente y cupo liberado.");
+      setShowCancelModal(false);
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      toast.error(err.message || "Error al anular la propuesta");
     } finally {
       setIsProcessing(false);
     }
@@ -224,12 +272,15 @@ export function ReviewProposalModal({
                           ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60"
                           : proposal.status === "APROBADO"
                             ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60"
-                            : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60"
+                            : proposal.status === "ANULADO"
+                              ? "bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
+                              : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60"
                         }`}
                     >
                       {proposal.status === "PENDIENTE" && <Clock className="w-3 h-3" />}
                       {proposal.status === "APROBADO" && <CheckCircle2 className="w-3 h-3" />}
                       {proposal.status === "RECHAZADO" && <XCircle className="w-3 h-3" />}
+                      {proposal.status === "ANULADO" && <XCircle className="w-3 h-3" />}
                       {proposal.status}
                     </span>
                   )}
@@ -346,7 +397,9 @@ export function ReviewProposalModal({
                   <div
                     className={`p-4 rounded-xl border text-xs flex items-start gap-3 ${proposal?.status === "APROBADO"
                         ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-300"
-                        : "bg-rose-500/10 border-rose-500/20 text-rose-800 dark:text-rose-300"
+                        : proposal?.status === "ANULADO"
+                          ? "bg-neutral-100 dark:bg-neutral-800/60 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300"
+                          : "bg-rose-500/10 border-rose-500/20 text-rose-800 dark:text-rose-300"
                       }`}
                   >
                     {proposal?.status === "APROBADO" ? (
@@ -356,12 +409,12 @@ export function ReviewProposalModal({
                     )}
                     <div className="space-y-1">
                       <p className="font-bold">
-                        Propuesta {proposal?.status === "APROBADO" ? "aprobada formalmente" : "rechazada"} por{" "}
+                        Propuesta {proposal?.status === "APROBADO" ? "aprobada formalmente" : proposal?.status === "ANULADO" ? "anulada" : "rechazada"} por{" "}
                         {proposal?.reviewer_name || "Coordinador"} el {formatDate(proposal?.reviewed_at)}
                       </p>
                       {proposal?.rejection_reason && (
                         <p className="text-xs">
-                          <strong>Motivo de rechazo:</strong> {proposal.rejection_reason}
+                          <strong>Motivo:</strong> {proposal.rejection_reason}
                         </p>
                       )}
                     </div>
@@ -393,7 +446,7 @@ export function ReviewProposalModal({
                           <tr>
                             <th className="py-2.5 px-3">Proveedor</th>
                             <th className="py-2.5 px-3">N° Factura</th>
-                            <th className="py-2.5 px-3 text-center">Tipo SAP</th>
+                            <th className="py-2.5 px-3 text-center">N° OC</th>
                             <th className="py-2.5 px-3">Vencimiento</th>
                             <th className="py-2.5 px-3 text-right">Monto Original</th>
                             <th className="py-2.5 px-3 text-right">Monto VES</th>
@@ -440,36 +493,44 @@ export function ReviewProposalModal({
                                   )}
                                 </td>
                                 <td className="py-2 px-3 font-semibold text-neutral-900 dark:text-neutral-100">
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedInvoiceId(inv.invoice_id)}
-                                    className="group inline-flex items-center gap-1 font-mono text-locatel-medio hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 transition-colors cursor-pointer"
-                                    title="Ver datos y desglose de la factura"
-                                  >
-                                    <span className="underline underline-offset-2 font-bold">{inv.invoice_number}</span>
-                                    <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                                  </button>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedInvoiceId(inv.invoice_id)}
+                                      className="group inline-flex items-center gap-1 font-mono text-locatel-medio hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 transition-colors cursor-pointer"
+                                      title="Ver datos y desglose de la factura"
+                                    >
+                                      <span className="underline underline-offset-2 font-bold">{inv.invoice_number}</span>
+                                      <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                                    </button>
+                                    {inv.is_indexed && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black tracking-wider uppercase bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                        INDEXADA
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
-                                <td className="py-2 px-3 text-center">
-                                  <span
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${inv.sap_document_type === "MIRO"
-                                        ? "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60"
-                                        : inv.sap_document_type === "MRKO"
-                                          ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60"
-                                          : "bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800/60"
-                                      }`}
-                                  >
-                                    {inv.sap_document_type}
-                                  </span>
+                                <td className="py-2 px-3 text-center font-mono text-[11px] text-neutral-600 dark:text-neutral-400">
+                                  {inv.purchase_order_number || "-"}
                                 </td>
                                 <td className="py-2 px-3 font-mono text-[11px] text-neutral-600 dark:text-neutral-400">
                                   {formatDate(inv.due_date)}
                                 </td>
                                 <td className="py-2 px-3 text-right font-mono font-semibold text-neutral-700 dark:text-neutral-300">
-                                  {formatMoney(inv.total_amount, inv.currency)}
+                                  <div>{formatMoney(inv.total_amount, inv.currency)}</div>
+                                  {inv.is_indexed && inv.exchange_rate && inv.exchange_rate > 0 && (
+                                    <div className="text-[10px] text-neutral-400 font-normal">
+                                      Tasa Emisión: {inv.exchange_rate.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="py-2 px-3 text-right font-mono font-bold text-neutral-900 dark:text-neutral-100">
-                                  Bs. {formatMoney(inv.amount_ves, "VES")}
+                                  <div>Bs. {formatMoney(inv.amount_ves, "VES")}</div>
+                                  {inv.is_indexed && inv.original_amount_ves && (
+                                    <div className="text-[10px] text-neutral-400 font-normal">
+                                      Ref: Bs. {formatMoney(inv.original_amount_ves, "VES")}
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             ))
@@ -567,11 +628,96 @@ export function ReviewProposalModal({
                     )}
                   </div>
                 )}
+
+                {canReview && proposal?.status === "APROBADO" && (
+                  <div className="pt-3 border-t border-neutral-200 dark:border-neutral-800 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setShowCancelModal(true)}
+                      disabled={isProcessing}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Anular Propuesta Aprobada</span>
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
         </div>
       </div>
+
+      {showCancelModal && proposal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-neutral-950/80 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl shadow-2xl overflow-hidden p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
+                  Anular Propuesta de Pago
+                </h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
+                  {proposal.code}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-rose-50/80 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 text-xs text-rose-800 dark:text-rose-300 space-y-1.5">
+              <p className="font-semibold">
+                ¿Está seguro de que desea invalidar o anular esta propuesta?
+              </p>
+              <ul className="list-disc pl-4 space-y-1 text-[11px] opacity-90">
+                <li>La propuesta pasará a estatus <strong>ANULADO</strong>.</li>
+                <li>Todas las facturas volverán a estatus <strong>PENDIENTE</strong> para poder ser incluidas en futuras propuestas.</li>
+                <li>El cupo de Tesorería retenido se liberará automáticamente.</li>
+              </ul>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-400 mb-1">
+                Motivo de la anulación (opcional)
+              </label>
+              <textarea
+                rows={2}
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="Especifique el motivo de la anulación..."
+                className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-xs text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCancelModal(false);
+                  setCancelReason("");
+                }}
+                disabled={isProcessing}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={isProcessing}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isProcessing ? (
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5" />
+                )}
+                <span>Confirmar Anulación</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SupplierDetailModal
         isOpen={Boolean(selectedSupplierId)}

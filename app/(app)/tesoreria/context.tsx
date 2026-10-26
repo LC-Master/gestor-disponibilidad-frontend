@@ -30,35 +30,47 @@ export function TreasuryProvider({ children }: { children: ReactNode }) {
 
   const loadData = async () => {
     try {
-      const [userRes, companiesRes, banksRes, accountsRes] = await Promise.all([
-        fetchClient("/api/auth/me"),
-        fetchClient("/api/v1/treasury/companies"),
-        fetchClient("/api/v1/treasury/banks"),
-        fetchClient("/api/v1/treasury/accounts"),
-      ]);
-
+      const userRes = await fetchClient("/api/auth/me");
       if (userRes.ok) {
         const u = await userRes.json();
         setUser(u);
       }
+    } catch (err) {
+      console.error(err);
+    }
+
+    try {
+      const companiesRes = await fetchClient("/api/v1/treasury/companies");
       if (companiesRes.ok) {
         const c = await companiesRes.json();
         setCompanies(Array.isArray(c) ? c : []);
       }
+    } catch {
+      setCompanies([]);
+    }
+
+    try {
+      const banksRes = await fetchClient("/api/v1/treasury/banks");
       if (banksRes.ok) {
         const b = await banksRes.json();
         setBanks(Array.isArray(b) ? b : []);
       }
+    } catch {
+      setBanks([]);
+    }
+
+    try {
+      const accountsRes = await fetchClient("/api/v1/treasury/accounts");
       if (accountsRes.ok) {
         const a = await accountsRes.json();
         setAccounts(Array.isArray(a) ? a : []);
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    } catch {
+      setAccounts([]);
     }
+
+    setLoading(false);
+    setRefreshing(false);
   };
 
   useEffect(() => {

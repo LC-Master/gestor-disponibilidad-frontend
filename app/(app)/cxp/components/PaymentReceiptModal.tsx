@@ -157,7 +157,7 @@ export function PaymentReceiptModal({ paymentId, onClose }: PaymentReceiptModalP
                       <tr>
                         <th className="py-2.5 px-3">Proveedor</th>
                         <th className="py-2.5 px-3">N° Factura</th>
-                        <th className="py-2.5 px-3">Tipo SAP</th>
+                        <th className="py-2.5 px-3">N° OC</th>
                         <th className="py-2.5 px-3 text-right">Monto Factura</th>
                         <th className="py-2.5 px-3 text-right">Monto Pagado</th>
                       </tr>
@@ -177,7 +177,7 @@ export function PaymentReceiptModal({ paymentId, onClose }: PaymentReceiptModalP
                             {inv.invoice_number}
                           </td>
                           <td className="py-2.5 px-3 font-mono text-[10px] text-neutral-500">
-                            {inv.sap_document_type}
+                            {inv.purchase_order_number || "-"}
                           </td>
                           <td className="py-2.5 px-3 text-right font-mono text-neutral-600 dark:text-neutral-400">
                             {formatMoney(inv.total_amount, inv.currency)}

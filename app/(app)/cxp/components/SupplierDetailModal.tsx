@@ -619,7 +619,7 @@ export function SupplierDetailModal({
                           <thead className="bg-neutral-50 dark:bg-neutral-800/80 text-neutral-700 dark:text-neutral-300 font-bold uppercase tracking-wider text-[11px] border-b border-neutral-200 dark:border-neutral-800 sticky top-0 z-10 backdrop-blur-xs">
                             <tr>
                               <th className="py-2.5 px-3">N° Factura</th>
-                              <th className="py-2.5 px-3 text-center">Tipo SAP</th>
+                              <th className="py-2.5 px-3 text-center">N° OC</th>
                               <th className="py-2.5 px-3 text-center">Emisión</th>
                               <th className="py-2.5 px-3 text-center">Vencimiento</th>
                               <th className="py-2.5 px-3 text-right">Monto Total</th>
@@ -637,10 +637,8 @@ export function SupplierDetailModal({
                                   <td className="py-2.5 px-3 font-mono font-bold text-neutral-900 dark:text-neutral-100">
                                     {inv.invoice_number}
                                   </td>
-                                  <td className="py-2.5 px-3 text-center">
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">
-                                      {inv.sap_document_type}
-                                    </span>
+                                  <td className="py-2.5 px-3 text-center font-mono text-[10px] text-neutral-500">
+                                    {inv.purchase_order_number || "-"}
                                   </td>
                                   <td className="py-2.5 px-3 text-center text-neutral-600 dark:text-neutral-400">
                                     {inv.issue_date?.split("T")[0] || "---"}

@@ -37,7 +37,18 @@ export const bankSchema = z.object({
     .optional()
     .or(z.literal("")),
   is_cash: z.boolean().default(false),
-});
+}).refine(
+  (data) => {
+    if (!data.is_cash && !data.code) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: "El código bancario es requerido",
+    path: ["code"],
+  }
+);
 
 export type BankFormData = z.infer<typeof bankSchema>;
 export const createBankSchema = bankSchema;

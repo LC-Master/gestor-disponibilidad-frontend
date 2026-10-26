@@ -2,25 +2,22 @@
 
 import { Suspense, useEffect, useState } from "react";
 import {
-  Building2,
-  Calendar,
   CheckCircle2,
   Eye,
   FileCheck2,
   FileText,
   History,
-  Landmark,
   Layers,
   RefreshCw,
   Search,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchClient } from "@/lib/fetchClient";
 import { Bank, Company } from "@/app/(app)/tesoreria/types";
-import { Invoice, InvoiceStatus, InvoiceType, PaymentListItem, SAPDocumentType } from "../types";
+import { Invoice, PaymentListItem } from "../types";
 import { PaymentReceiptModal } from "./PaymentReceiptModal";
 import { InvoiceAuditTrailModal } from "./InvoiceAuditTrailModal";
+import { InvoiceDetailModal } from "./InvoiceDetailModal";
 
 interface PaymentsHistoryViewProps {
   companies: Company[];
@@ -149,24 +146,25 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
     return sum + rem * rate;
   }, 0);
 
-  const renderTypeBadge = (sapType: SAPDocumentType, invoiceType: InvoiceType) => {
+  const renderTypeBadge = (inv: Invoice) => {
+    const sType = inv.supplier?.supplier_type || "FIRME";
     let colorClasses = "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300";
-    if (sapType === "MIRO") {
-      colorClasses = "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60";
-    } else if (sapType === "MRKO") {
+    if (sType === "CONSIGNACION") {
       colorClasses = "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60";
-    } else if (sapType === "FB60") {
+    } else {
       colorClasses = "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60";
     }
 
     return (
       <div className="flex flex-col items-start gap-0.5">
         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${colorClasses}`}>
-          {sapType}
+          {sType}
         </span>
-        <span className="text-[10px] text-neutral-400 dark:text-neutral-500">
-          {invoiceType}
-        </span>
+        {inv.purchase_order_number && (
+          <span className="text-[10px] font-mono text-neutral-400 dark:text-neutral-500">
+            OC: {inv.purchase_order_number}
+          </span>
+        )}
       </div>
     );
   };
@@ -178,11 +176,10 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
           <button
             type="button"
             onClick={() => setActiveTab("settlements")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === "settlements"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === "settlements"
                 ? "bg-white dark:bg-neutral-900 text-emerald-700 dark:text-emerald-400 shadow-xs"
                 : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
-            }`}
+              }`}
           >
             <Layers className="w-4 h-4" />
             <span>Liquidaciones por Lote</span>
@@ -190,11 +187,10 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
           <button
             type="button"
             onClick={() => setActiveTab("invoices")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === "invoices"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === "invoices"
                 ? "bg-white dark:bg-neutral-900 text-emerald-700 dark:text-emerald-400 shadow-xs"
                 : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
-            }`}
+              }`}
           >
             <FileCheck2 className="w-4 h-4" />
             <span>Facturas Pagadas</span>
@@ -239,11 +235,10 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
             title="Refrescar historial"
           >
             <RefreshCw
-              className={`w-4 h-4 ${
-                (activeTab === "settlements" ? loadingPayments : loadingInvoices)
+              className={`w-4 h-4 ${(activeTab === "settlements" ? loadingPayments : loadingInvoices)
                   ? "animate-spin text-locatel-medio"
                   : ""
-              }`}
+                }`}
             />
           </button>
         </div>
@@ -454,7 +449,7 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
                         {inv.invoice_number}
                       </td>
                       <td className="py-3.5 px-4">
-                        {renderTypeBadge(inv.sap_document_type, inv.invoice_type)}
+                        {renderTypeBadge(inv)}
                       </td>
                       <td className="py-3.5 px-4 text-neutral-600 dark:text-neutral-300">
                         {formatDate(inv.issue_date)}
@@ -500,103 +495,11 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
         </div>
       )}
 
-      {selectedInvoiceDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-neutral-900 dark:text-neutral-100">
-                  Detalle de Factura N° {selectedInvoiceDetail.invoice_number}
-                </h3>
-                <p className="text-[11px] text-neutral-400">
-                  Tipo SAP: {selectedInvoiceDetail.sap_document_type} ({selectedInvoiceDetail.invoice_type})
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedInvoiceDetail(null)}
-                className="p-1.5 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200/60 dark:border-neutral-800">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-neutral-400">
-                    Empresa
-                  </span>
-                  <p className="font-semibold text-neutral-800 dark:text-neutral-200 mt-0.5">
-                    {selectedInvoiceDetail.company?.name || "Empresa"}
-                  </p>
-                </div>
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-neutral-400">
-                    Estatus
-                  </span>
-                  <p className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
-                    PAGADO
-                  </p>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-[10px] uppercase font-bold text-neutral-400">
-                    Proveedor
-                  </span>
-                  <p className="font-semibold text-neutral-800 dark:text-neutral-200 mt-0.5">
-                    {selectedInvoiceDetail.supplier?.rif} -{" "}
-                    {selectedInvoiceDetail.supplier?.business_name}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800">
-                  <span className="text-[10px] uppercase font-bold text-neutral-400">
-                    F. Emisión
-                  </span>
-                  <p className="font-medium text-neutral-800 dark:text-neutral-200 mt-0.5">
-                    {formatDate(selectedInvoiceDetail.issue_date)}
-                  </p>
-                </div>
-                <div className="p-2.5 rounded-xl border border-neutral-200 dark:border-neutral-800">
-                  <span className="text-[10px] uppercase font-bold text-neutral-400">
-                    F. Vencimiento
-                  </span>
-                  <p className="font-medium text-neutral-800 dark:text-neutral-200 mt-0.5">
-                    {formatDate(selectedInvoiceDetail.due_date)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 space-y-2">
-                <div className="flex justify-between items-center text-neutral-500">
-                  <span>Monto Total:</span>
-                  <span className="font-mono text-neutral-900 dark:text-neutral-100 font-bold">
-                    {formatMoney(selectedInvoiceDetail.total_amount, selectedInvoiceDetail.currency)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-neutral-500">
-                  <span>Monto Liquidado:</span>
-                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">
-                    {formatMoney(selectedInvoiceDetail.paid_amount || selectedInvoiceDetail.total_amount, selectedInvoiceDetail.currency)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedInvoiceDetail(null)}
-                  className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-                >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <InvoiceDetailModal
+        isOpen={Boolean(selectedInvoiceDetail)}
+        onClose={() => setSelectedInvoiceDetail(null)}
+        invoice={selectedInvoiceDetail}
+      />
 
       <InvoiceAuditTrailModal
         isOpen={Boolean(selectedInvoiceAudit)}

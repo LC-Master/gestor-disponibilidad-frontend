@@ -54,6 +54,7 @@ export function SuppliersManagement({
   const [modalRif, setModalRif] = useState("");
   const [modalBusinessName, setModalBusinessName] = useState("");
   const [modalSapVendorCode, setModalSapVendorCode] = useState("");
+  const [modalSupplierType, setModalSupplierType] = useState<"FIRME" | "CONSIGNACION">("FIRME");
   const [modalCreditDays, setModalCreditDays] = useState("0");
 
   const canManageSuppliers = Boolean(
@@ -98,6 +99,7 @@ export function SuppliersManagement({
     setModalRif("");
     setModalBusinessName("");
     setModalSapVendorCode("");
+    setModalSupplierType("FIRME");
     setModalCreditDays("0");
     setIsModalOpen(true);
   };
@@ -107,6 +109,7 @@ export function SuppliersManagement({
     setModalRif(supplier.rif);
     setModalBusinessName(supplier.business_name);
     setModalSapVendorCode(supplier.sap_vendor_code || "");
+    setModalSupplierType(supplier.supplier_type || "FIRME");
     setModalCreditDays(String(supplier.credit_days));
     setIsModalOpen(true);
   };
@@ -141,6 +144,7 @@ export function SuppliersManagement({
         const payload: UpdateSupplierPayload = {
           business_name: modalBusinessName.trim(),
           sap_vendor_code: modalSapVendorCode.trim() ? modalSapVendorCode.trim() : undefined,
+          supplier_type: modalSupplierType,
           credit_days: creditDays,
         };
 
@@ -161,6 +165,7 @@ export function SuppliersManagement({
           rif: modalRif.trim().toUpperCase(),
           business_name: modalBusinessName.trim(),
           sap_vendor_code: modalSapVendorCode.trim() ? modalSapVendorCode.trim() : undefined,
+          supplier_type: modalSupplierType,
           credit_days: creditDays,
         };
 
@@ -277,6 +282,7 @@ export function SuppliersManagement({
               <tr>
                 <th className="py-3 px-4">RIF</th>
                 <th className="py-3 px-4">Razón Social</th>
+                <th className="py-3 px-4">Tipo</th>
                 <th className="py-3 px-4">Código SAP</th>
                 <th className="py-3 px-4 text-center">Días de Crédito</th>
                 <th className="py-3 px-4 text-center">Estado</th>
@@ -313,6 +319,15 @@ export function SuppliersManagement({
                     </td>
                     <td className="py-3.5 px-4 font-medium text-neutral-900 dark:text-neutral-200 max-w-xs truncate">
                       {s.business_name}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
+                        s.supplier_type === "CONSIGNACION"
+                          ? "bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60"
+                          : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60"
+                      }`}>
+                        {s.supplier_type || "FIRME"}
+                      </span>
                     </td>
                     <td className="py-3.5 px-4 font-mono text-neutral-600 dark:text-neutral-400">
                       {s.sap_vendor_code ? (
@@ -457,6 +472,21 @@ export function SuppliersManagement({
                   className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-xs text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40 focus:border-locatel-medio"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1.5">
+                  Tipo de Proveedor *
+                </label>
+                <select
+                  value={modalSupplierType}
+                  onChange={(e) => setModalSupplierType(e.target.value as "FIRME" | "CONSIGNACION")}
+                  className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-xl text-xs font-semibold text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40 focus:border-locatel-medio cursor-pointer"
+                  required
+                >
+                  <option value="FIRME">FIRME (Vencimiento según crédito MIGO)</option>
+                  <option value="CONSIGNACION">CONSIGNACIÓN (Pago según liquidación de ventas)</option>
+                </select>
               </div>
 
               <div>

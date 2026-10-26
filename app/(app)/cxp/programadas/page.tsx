@@ -17,14 +17,6 @@ export default function ScheduledInvoicesPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-100">
-          Cuentas por Pagar - Facturas Programadas por Pagar
-        </h1>
-        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-          Compromisos comerciales aprobados listos para ejecución y liquidación bancaria
-        </p>
-      </div>
       <ScheduledInvoicesTableView companies={companies} user={user} />
     </div>
   );

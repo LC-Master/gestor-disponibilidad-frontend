@@ -3,6 +3,7 @@ export interface Supplier {
   rif: string;
   business_name: string;
   sap_vendor_code?: string;
+  supplier_type: "FIRME" | "CONSIGNACION";
   credit_days: number;
   is_active: boolean;
   created_at?: string;
@@ -13,12 +14,14 @@ export interface CreateSupplierPayload {
   rif: string;
   business_name: string;
   sap_vendor_code?: string;
+  supplier_type?: "FIRME" | "CONSIGNACION";
   credit_days: number;
 }
 
 export interface UpdateSupplierPayload {
   business_name: string;
   sap_vendor_code?: string;
+  supplier_type?: "FIRME" | "CONSIGNACION";
   credit_days: number;
 }
 
@@ -39,17 +42,39 @@ export interface Invoice {
   supplier?: Supplier;
   invoice_number: string;
   control_number?: string;
-  invoice_type: InvoiceType;
-  sap_document_type: SAPDocumentType;
+  purchase_order_number?: string;
+  invoice_type?: InvoiceType;
+  sap_document_type?: SAPDocumentType;
   reception_date: string;
   issue_date: string;
   due_date: string;
   currency: "VES" | "USD" | "EUR";
   exchange_rate: number;
+  printed_rate?: number;
   subtotal: number;
+  discount_amount: number;
+  exempt_amount: number;
+  taxable_base_16: number;
+  tax_amount_16: number;
+  taxable_base_8: number;
+  tax_amount_8: number;
+  taxable_base_31: number;
+  tax_amount_31: number;
   tax_amount: number;
+  igtf_amount: number;
+  vat_retention_pct: number;
+  vat_retention_amount: number;
+  islr_retention_pct: number;
+  islr_retention_amount: number;
   total_amount: number;
+  total_amount_usd: number;
+  equivalent_amount: number;
+  net_amount: number;
+  net_amount_usd: number;
   paid_amount: number;
+  is_indexed: boolean;
+  early_payment_pct: number;
+  drive_file_id?: string;
   status: InvoiceStatus;
   created_at?: string;
   updated_at?: string;
@@ -69,16 +94,39 @@ export interface CreateInvoicePayload {
   supplier_id: string;
   invoice_number: string;
   control_number?: string;
-  invoice_type: InvoiceType;
-  sap_document_type: SAPDocumentType;
+  purchase_order_number?: string;
+  invoice_type?: string;
+  sap_document_type?: string;
   reception_date: string;
   issue_date: string;
   due_date: string;
   currency: string;
   exchange_rate: number;
+  printed_rate?: number;
   subtotal: number;
+  discount_amount?: number;
+  exempt_amount?: number;
+  taxable_base_16?: number;
+  tax_amount_16?: number;
+  taxable_base_8?: number;
+  tax_amount_8?: number;
+  taxable_base_31?: number;
+  tax_amount_31?: number;
   tax_amount: number;
+  igtf_amount?: number;
+  vat_retention_pct?: number;
+  vat_retention_amount?: number;
+  islr_retention_pct?: number;
+  islr_retention_amount?: number;
   total_amount: number;
+  total_amount_usd?: number;
+  equivalent_amount?: number;
+  net_amount?: number;
+  net_amount_usd?: number;
+  paid_amount?: number;
+  is_indexed?: boolean;
+  early_payment_pct?: number;
+  drive_file_id?: string;
 }
 
 export interface PaymentProposalPayload {
@@ -192,6 +240,7 @@ export interface SupplierDetailsResponse {
   rif: string;
   business_name: string;
   sap_vendor_code?: string;
+  supplier_type?: "FIRME" | "CONSIGNACION";
   credit_days: number;
   is_active: boolean;
   supplier?: Supplier;
@@ -199,18 +248,21 @@ export interface SupplierDetailsResponse {
   invoices: Invoice[];
 }
 
-export type ProposalStatus = "PENDIENTE" | "APROBADO" | "RECHAZADO" | "ANULADO";
+export type ProposalStatus = "PENDIENTE" | "APROBADO" | "RECHAZADO" | "ANULADO" | "PAGADA" | "PAGADO";
 
 export interface PaymentProposal {
   id: string;
   code: string;
   company_id: string;
   company_name?: string;
+  daily_availability_id?: string;
   execution_date: string;
+  exchange_rate: number;
   status: ProposalStatus;
   total_amount_ves: number;
   total_amount_usd: number;
   invoice_count: number;
+  has_indexed_invoices?: boolean;
   notes?: string;
   rejection_reason?: string;
   created_by: string;
@@ -228,13 +280,18 @@ export interface ProposalInvoiceDetail {
   supplier_name: string;
   invoice_number: string;
   control_number?: string;
-  sap_document_type: string;
+  purchase_order_number?: string;
+  sap_document_type?: string;
   issue_date: string;
   due_date: string;
   currency: string;
   total_amount: number;
+  total_amount_usd?: number;
+  exchange_rate?: number;
+  is_indexed?: boolean;
   amount_ves: number;
   amount_usd: number;
+  original_amount_ves?: number;
 }
 
 export interface ProposalDailyAvailability {
@@ -258,12 +315,23 @@ export interface ProposalDetailsResponse {
   consumed_quota: number;
 }
 
+export interface ProposalAdjustmentPayload {
+  invoice_id: string;
+  adjustment_type: "DEBITO" | "CREDITO";
+  description: string;
+  amount: number;
+}
+
 export interface CreateProposalPayload {
   company_id: string;
+  daily_availability_id?: string;
   execution_date: string;
   notes?: string;
+  apply_early_payment?: boolean;
   invoice_ids: string[];
+  adjustments?: ProposalAdjustmentPayload[];
 }
+
 
 export interface RejectProposalPayload {
   reason: string;
@@ -302,9 +370,10 @@ export interface PaymentInvoiceDetailItem {
   invoice_id: string;
   invoice_number: string;
   control_number?: string;
+  purchase_order_number?: string;
   supplier_rif: string;
   supplier_name: string;
-  sap_document_type: string;
+  sap_document_type?: string;
   currency: string;
   total_amount: number;
   amount_paid: number;
@@ -315,3 +384,51 @@ export interface PaymentDetailResponse {
   invoices: PaymentInvoiceDetailItem[];
 }
 
+export interface RateItem {
+  Moneda: string;
+  Valor: number;
+  Fecha: string;
+  Simbolo: string;
+  FechaValida: string;
+}
+
+export interface CurrentRatesResponse {
+  dolar: RateItem;
+  euro: RateItem;
+  pesos: RateItem;
+}
+
+export interface DifferentialResponse {
+  currency: string;
+  issue_date: string;
+  payment_date: string;
+  issue_rate: number;
+  payment_rate: number;
+  absolute_difference: number;
+  percentage_difference: number;
+}
+
+export interface AiInvoiceRecommendation {
+  invoice_id: string;
+  invoice_number: string;
+  supplier_name: string;
+  supplier_rif: string;
+  due_date: string;
+  days_overdue: number;
+  net_amount: number;
+  currency: string;
+  net_amount_ves: number;
+  early_payment_discount: number;
+  priority: "ALTA" | "MEDIA" | "BAJA";
+  reasoning: string;
+}
+
+export interface AiProposalRecommendationsResponse {
+  total_recommended_ves: number;
+  total_recommended_usd: number;
+  quota_available_ves: number;
+  quota_usage_pct: number;
+  executive_summary: string;
+  recommendations: AiInvoiceRecommendation[];
+  eligible_invoices?: Invoice[];
+}

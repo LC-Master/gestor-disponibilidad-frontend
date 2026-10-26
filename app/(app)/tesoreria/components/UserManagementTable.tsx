@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { fetchClient } from "@/lib/fetchClient";
 import { PermissionDetail, RoleDetail, UserProfile, UserWithRoles } from "../types";
+import { UserModal, getFriendlyPermission } from "./UserModal";
 
 interface UserManagementTableProps {
   currentUser?: UserProfile | null;
@@ -43,26 +44,155 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
   const [selectedUser, setSelectedUser] = useState<UserWithRoles | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  const canManageUsers = useMemo(() => {
-    const perms = currentUser?.permissions || [];
-    const roles = currentUser?.roles || [];
-    return (
-      perms.includes("users.manage") ||
-      roles.some((r) => r.toUpperCase() === "ADMIN" || r.toUpperCase() === "ADMINISTRADOR")
-    );
+  const rolesList = useMemo(() => {
+    return (currentUser?.roles || []).map((r) => r.toUpperCase().trim());
   }, [currentUser]);
 
   const isAdmin = useMemo(() => {
-    const roles = currentUser?.roles || [];
-    return roles.some((r) => r.toUpperCase() === "ADMIN" || r.toUpperCase() === "ADMINISTRADOR");
-  }, [currentUser]);
+    return rolesList.includes("ADMIN") || rolesList.includes("ADMINISTRADOR");
+  }, [rolesList]);
+
+  const isCoordTes = useMemo(() => {
+    return rolesList.includes("COORD_TESORERIA") && !isAdmin;
+  }, [rolesList, isAdmin]);
+
+  const isCoordCxp = useMemo(() => {
+    return rolesList.includes("COORD_CXP") && !isAdmin;
+  }, [rolesList, isAdmin]);
+
+  const isAnalystOnly = useMemo(() => {
+    return (
+      (rolesList.includes("ANALISTA_TESORERIA") || rolesList.includes("ANALISTA_CXP")) &&
+      !isCoordTes &&
+      !isCoordCxp &&
+      !isAdmin
+    );
+  }, [rolesList, isCoordTes, isCoordCxp, isAdmin]);
+
+  const canManageUsers = useMemo(() => {
+    if (isAnalystOnly) return false;
+    const perms = (currentUser?.permissions || []).map((p) => p.toLowerCase().trim());
+    return (
+      isAdmin ||
+      isCoordTes ||
+      isCoordCxp ||
+      perms.includes("users.manage")
+    );
+  }, [isAnalystOnly, isAdmin, isCoordTes, isCoordCxp, currentUser]);
+
+  const fallbackRolesList: RoleDetail[] = [
+    { name: "ADMIN", display_name: "Administrador (Acceso Total)", description: "Acceso Total al Sistema y Administrador" },
+    { name: "COORD_TESORERIA", display_name: "Coordinador de Tesorería", description: "Coordinador de Tesorería" },
+    { name: "COORD_CXP", display_name: "Coordinador de Cuentas por Pagar", description: "Coordinador de Cuentas por Pagar" },
+    { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería", description: "Analista de Tesorería" },
+    { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar", description: "Analista de Cuentas por Pagar" },
+  ];
+
+  const ROLE_DEFAULT_PERMISSIONS: Record<string, string[]> = {
+    ADMIN: [
+      "core.accounts.manage",
+      "treasury.accounts.view",
+      "treasury.accounts.manage",
+      "treasury.balances.view",
+      "treasury.balances.record",
+      "treasury.balances.edit",
+      "treasury.balances.override",
+      "treasury.availability.view",
+      "treasury.availability.edit",
+      "treasury.availability.approve",
+      "treasury.history.view",
+      "reports.treasury.view",
+      "reports.dashboard.view",
+      "users.view",
+      "users.manage",
+      "cxp.suppliers.view",
+      "cxp.suppliers.manage",
+      "cxp.invoices.view",
+      "cxp.invoices.create",
+      "cxp.invoices.edit",
+      "cxp.invoices.cancel",
+      "cxp.calendar.view",
+      "cxp.payments.schedule",
+      "cxp.payments.approve",
+      "cxp.payments.execute",
+      "cxp.payments.revert",
+      "cxp.reports.view",
+      "cxp.proposals.create",
+      "cxp.proposals.view",
+      "cxp.proposals.review",
+    ],
+    COORD_TESORERIA: [
+      "users.view",
+      "users.manage",
+      "core.accounts.manage",
+      "treasury.accounts.view",
+      "treasury.accounts.manage",
+      "treasury.balances.view",
+      "treasury.balances.edit",
+      "treasury.balances.record",
+      "treasury.balances.override",
+      "treasury.availability.view",
+      "treasury.availability.edit",
+      "treasury.availability.approve",
+      "treasury.history.view",
+      "reports.treasury.view",
+      "reports.dashboard.view",
+    ],
+    ANALISTA_TESORERIA: [
+      "treasury.accounts.view",
+      "treasury.balances.view",
+      "treasury.balances.edit",
+      "treasury.balances.record",
+      "treasury.availability.view",
+      "treasury.history.view",
+      "reports.treasury.view",
+    ],
+    COORD_CXP: [
+      "users.view",
+      "users.manage",
+      "cxp.suppliers.view",
+      "cxp.suppliers.manage",
+      "cxp.invoices.view",
+      "cxp.invoices.create",
+      "cxp.invoices.edit",
+      "cxp.invoices.cancel",
+      "cxp.calendar.view",
+      "cxp.payments.schedule",
+      "cxp.payments.approve",
+      "cxp.payments.execute",
+      "cxp.payments.revert",
+      "cxp.reports.view",
+      "cxp.proposals.create",
+      "cxp.proposals.view",
+      "cxp.proposals.review",
+      "reports.dashboard.view",
+    ],
+    ANALISTA_CXP: [
+      "cxp.suppliers.view",
+      "cxp.invoices.view",
+      "cxp.invoices.create",
+      "cxp.invoices.edit",
+      "cxp.calendar.view",
+      "cxp.payments.schedule",
+      "cxp.reports.view",
+      "cxp.proposals.create",
+      "cxp.proposals.view",
+    ],
+  };
 
   const selectableRoles = useMemo(() => {
-    if (canManageUsers) return availableRoles;
-    return availableRoles.filter(
-      (r) => r.name.toUpperCase() !== "ADMIN" && r.name.toUpperCase() !== "ADMINISTRADOR"
-    );
-  }, [availableRoles, canManageUsers]);
+    const base = availableRoles.length > 0 ? availableRoles : fallbackRolesList;
+    if (isAdmin) {
+      return base;
+    }
+    if (isCoordTes) {
+      return base.filter((r) => r.name === "ANALISTA_TESORERIA");
+    }
+    if (isCoordCxp) {
+      return base.filter((r) => r.name === "ANALISTA_CXP");
+    }
+    return base;
+  }, [availableRoles, isAdmin, isCoordTes, isCoordCxp]);
 
   const [createForm, setCreateForm] = useState({
     name: "",
@@ -71,7 +201,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
     password: "",
     confirmPassword: "",
     roles: ["ANALISTA_TESORERIA"],
-    permissions: [] as string[],
+    permissions: ROLE_DEFAULT_PERMISSIONS["ANALISTA_TESORERIA"] || [],
   });
 
   const [editForm, setEditForm] = useState({
@@ -91,13 +221,17 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
     try {
       const [usersRes, rolesRes, permsRes] = await Promise.all([
         fetchClient("/api/v1/users"),
-        fetchClient("/api/roles").catch(() => fetchClient("/api/v1/roles")),
-        fetchClient("/api/permissions").catch(() => fetchClient("/api/v1/permissions")),
+        fetchClient("/api/v1/roles").catch(() => fetchClient("/api/roles")),
+        fetchClient("/api/v1/permissions").catch(() => fetchClient("/api/permissions")),
       ]);
 
       if (usersRes.ok) {
         const data = await usersRes.json();
         setUsers(Array.isArray(data) ? data : []);
+      } else if (usersRes.status === 403) {
+        const errJson = await usersRes.json().catch(() => null);
+        toast.error(errJson?.message || "No tiene autorización para gestionar usuarios fuera de su departamento");
+        setUsers([]);
       }
 
       if (rolesRes && rolesRes.ok) {
@@ -266,14 +400,15 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
 
       toast.success("Usuario creado exitosamente con sus roles y matriz de permisos");
       setIsCreateOpen(false);
+      const initialRole = isCoordCxp ? "ANALISTA_CXP" : "ANALISTA_TESORERIA";
       setCreateForm({
         name: "",
         lastName: "",
         email: "",
         password: "",
         confirmPassword: "",
-        roles: ["ANALISTA_TESORERIA"],
-        permissions: [],
+        roles: [initialRole],
+        permissions: [...(ROLE_DEFAULT_PERMISSIONS[initialRole] || [])],
       });
       await loadData();
     } catch (err: unknown) {
@@ -330,78 +465,85 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
   };
 
   const toggleRoleSelection = (roleName: string, isCreate: boolean) => {
+    const defaultPerms = ROLE_DEFAULT_PERMISSIONS[roleName.toUpperCase().trim()] || [];
     if (isCreate) {
-      setCreateForm((prev) => {
-        const has = prev.roles.includes(roleName);
-        return {
-          ...prev,
-          roles: has ? prev.roles.filter((r) => r !== roleName) : [...prev.roles, roleName],
-        };
-      });
+      setCreateForm((prev) => ({
+        ...prev,
+        roles: [roleName],
+        permissions: [...defaultPerms],
+      }));
     } else {
-      setEditForm((prev) => {
-        const has = prev.roles.includes(roleName);
-        return {
-          ...prev,
-          roles: has ? prev.roles.filter((r) => r !== roleName) : [...prev.roles, roleName],
-        };
-      });
+      setEditForm((prev) => ({
+        ...prev,
+        roles: [roleName],
+        permissions: [...defaultPerms],
+      }));
     }
   };
 
   const togglePermissionSelection = (code: string, isCreate: boolean) => {
     if (isCreate) {
       setCreateForm((prev) => {
-        const has = prev.permissions.includes(code);
+        const perms = prev.permissions || [];
+        const has = perms.includes(code);
         return {
           ...prev,
           permissions: has
-            ? prev.permissions.filter((p) => p !== code)
-            : [...prev.permissions, code],
+            ? perms.filter((p) => p !== code)
+            : [...perms, code],
         };
       });
     } else {
       setEditForm((prev) => {
-        const has = prev.permissions.includes(code);
+        const perms = prev.permissions || [];
+        const has = perms.includes(code);
         return {
           ...prev,
           permissions: has
-            ? prev.permissions.filter((p) => p !== code)
-            : [...prev.permissions, code],
+            ? perms.filter((p) => p !== code)
+            : [...perms, code],
         };
       });
     }
   };
 
   const toggleModulePermissions = (moduleName: string, isCreate: boolean) => {
-    const modulePerms = (permissionsByModule.get(moduleName) || []).map((p) => p.code);
+    const modulePerms = availablePermissions
+      .filter((p) => {
+        const meta = getFriendlyPermission(p.code, p.name, p.description);
+        return meta.category === moduleName || p.module === moduleName;
+      })
+      .map((p) => p.code);
+
     if (isCreate) {
       setCreateForm((prev) => {
-        const allSelected = modulePerms.every((code) => prev.permissions.includes(code));
+        const perms = prev.permissions || [];
+        const allSelected = modulePerms.every((code) => perms.includes(code));
         if (allSelected) {
           return {
             ...prev,
-            permissions: prev.permissions.filter((c) => !modulePerms.includes(c)),
+            permissions: perms.filter((c) => !modulePerms.includes(c)),
           };
         } else {
           return {
             ...prev,
-            permissions: Array.from(new Set([...prev.permissions, ...modulePerms])),
+            permissions: Array.from(new Set([...perms, ...modulePerms])),
           };
         }
       });
     } else {
       setEditForm((prev) => {
-        const allSelected = modulePerms.every((code) => prev.permissions.includes(code));
+        const perms = prev.permissions || [];
+        const allSelected = modulePerms.every((code) => perms.includes(code));
         if (allSelected) {
           return {
             ...prev,
-            permissions: prev.permissions.filter((c) => !modulePerms.includes(c)),
+            permissions: perms.filter((c) => !modulePerms.includes(c)),
           };
         } else {
           return {
             ...prev,
-            permissions: Array.from(new Set([...prev.permissions, ...modulePerms])),
+            permissions: Array.from(new Set([...perms, ...modulePerms])),
           };
         }
       });
@@ -432,6 +574,28 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
         </span>
       );
     }
+    if (upper === "COORD_CXP") {
+      return (
+        <span
+          key={roleName}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+        >
+          <Shield className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+          Coordinador de CXP
+        </span>
+      );
+    }
+    if (upper === "ANALISTA_CXP") {
+      return (
+        <span
+          key={roleName}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-50/70 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/60"
+        >
+          <User className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+          Analista de CXP
+        </span>
+      );
+    }
     return (
       <span
         key={roleName}
@@ -445,20 +609,48 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-              <Users className="w-5 h-5 text-locatel-medio" />
-              Gestión Integral de Usuarios y Permisos
-            </h2>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
+          <div className="relative">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre o correo corporativo..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30"
+            />
           </div>
-          <p className="text-xs text-neutral-500 mt-1">
-            Administración centralizada de identidades, elevación de privilegios a Coordinador/Admin y asignación de matriz de permisos puntuales.
-          </p>
+
+          <div>
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
+            >
+              <option value="all">Filtrar por Rol: Todos</option>
+              <option value="ADMIN">Administrador Global</option>
+              <option value="COORD_TESORERIA">Coordinador de Tesorería</option>
+              <option value="ANALISTA_TESORERIA">Analista de Tesorería</option>
+              <option value="COORD_CXP">Coordinador de Cuentas por Pagar</option>
+              <option value="ANALISTA_CXP">Analista de Cuentas por Pagar</option>
+            </select>
+          </div>
+
+          <div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
+            >
+              <option value="all">Filtrar por Estado: Todos</option>
+              <option value="active">Solo Usuarios Activos</option>
+              <option value="inactive">Solo Usuarios Inactivos</option>
+            </select>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 shrink-0 justify-end">
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -468,51 +660,27 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
             <span>Actualizar</span>
           </button>
 
-          <button
-            onClick={() => setIsCreateOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-locatel-medio hover:bg-locatel-oscuro text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Nuevo Usuario</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs">
-        <div className="relative">
-          <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            placeholder="Buscar por nombre o correo corporativo..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30"
-          />
-        </div>
-
-        <div>
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="w-full px-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
-          >
-            <option value="all">Filtrar por Rol: Todos</option>
-            <option value="ADMIN">Administrador Global</option>
-            <option value="COORD_TESORERIA">Coordinador de Tesorería</option>
-            <option value="ANALISTA_TESORERIA">Analista de Tesorería</option>
-          </select>
-        </div>
-
-        <div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="w-full px-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
-          >
-            <option value="all">Filtrar por Estado: Todos</option>
-            <option value="active">Solo Usuarios Activos</option>
-            <option value="inactive">Solo Usuarios Inactivos</option>
-          </select>
+          {canManageUsers && (
+            <button
+              onClick={() => {
+                const initialRole = isCoordCxp ? "ANALISTA_CXP" : "ANALISTA_TESORERIA";
+                setCreateForm({
+                  name: "",
+                  lastName: "",
+                  email: "",
+                  password: "",
+                  confirmPassword: "",
+                  roles: [initialRole],
+                  permissions: [...(ROLE_DEFAULT_PERMISSIONS[initialRole] || [])],
+                });
+                setIsCreateOpen(true);
+              }}
+              className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-locatel-medio hover:bg-locatel-oscuro text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Nuevo Usuario</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -611,13 +779,13 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                         </td>
 
                         <td className="px-4 py-3.5 text-center">
-                          {isProtected ? (
+                          {!canManageUsers || isProtected ? (
                             <span
                               className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold opacity-75 cursor-not-allowed ${u.is_active
-                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800"
-                                  : "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-400 border border-red-300 dark:border-red-800"
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800"
+                                : "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-400 border border-red-300 dark:border-red-800"
                                 }`}
-                              title="Cuenta protegida: solo un administrador puede modificarla"
+                              title={isProtected ? "Cuenta protegida: solo un administrador puede modificarla" : "Permiso de administración requerido"}
                             >
                               <Lock className="w-3 h-3 text-amber-500" />
                               <span>{u.is_active ? "Activo" : "Inactivo"}</span>
@@ -626,8 +794,8 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                             <button
                               onClick={() => handleToggleStatus(u)}
                               className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold transition-all cursor-pointer ${u.is_active
-                                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-200"
-                                  : "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-400 border border-red-300 dark:border-red-800 hover:bg-red-200"
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-200"
+                                : "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-400 border border-red-300 dark:border-red-800 hover:bg-red-200"
                                 }`}
                               title={`Click para ${u.is_active ? "desactivar" : "activar"} acceso`}
                             >
@@ -638,7 +806,14 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                         </td>
 
                         <td className="px-4 py-3.5 text-right">
-                          {isProtected ? (
+                          {!canManageUsers ? (
+                            <span
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-neutral-400 text-xs font-semibold"
+                            >
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>Solo Lectura</span>
+                            </span>
+                          ) : isProtected ? (
                             <span
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 text-xs font-semibold shadow-xs"
                               title="Cuenta protegida: solo un administrador puede modificar a otro administrador"
@@ -666,551 +841,36 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
         )}
       </div>
 
-      {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
-          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-5 my-8 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-100 dark:border-neutral-800">
-              <div className="flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-locatel-medio" />
-                <h3 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
-                  Crear Nuevo Usuario en el Sistema
-                </h3>
-              </div>
-              <button
-                onClick={() => setIsCreateOpen(false)}
-                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <UserModal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onSubmit={handleCreateSubmit}
+        isEdit={false}
+        formData={createForm}
+        setFormData={setCreateForm}
+        selectableRoles={selectableRoles}
+        availablePermissions={availablePermissions}
+        isSubmitting={isSubmitting}
+        onToggleRole={(roleName) => toggleRoleSelection(roleName, true)}
+        onTogglePermission={(code) => togglePermissionSelection(code, true)}
+        onToggleModulePermissions={(modName) => toggleModulePermissions(modName, true)}
+      />
 
-            <form onSubmit={handleCreateSubmit} className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                    Nombre *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={createForm.name}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, name: e.target.value })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                    Apellido *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={createForm.lastName}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, lastName: e.target.value })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                  Correo Electrónico Corporativo *
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={createForm.email}
-                  onChange={(e) =>
-                    setCreateForm({ ...createForm, email: e.target.value })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                    Contraseña * (mínimo 8 caracteres)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      minLength={8}
-                      value={createForm.password}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, password: e.target.value })
-                      }
-                      className="w-full pl-3 pr-9 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                    Confirmación de Contraseña *
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      minLength={8}
-                      value={createForm.confirmPassword}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, confirmPassword: e.target.value })
-                      }
-                      className={`w-full pl-3 pr-9 py-2 text-xs rounded-xl border bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 transition-all ${createForm.confirmPassword &&
-                          createForm.password !== createForm.confirmPassword
-                          ? "border-red-500 focus:ring-red-400"
-                          : "border-neutral-300 dark:border-neutral-700 focus:ring-locatel-medio"
-                        }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  {createForm.confirmPassword &&
-                    createForm.password !== createForm.confirmPassword && (
-                      <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        Las contraseñas no coinciden
-                      </p>
-                    )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
-                  Selección de Roles del Sistema
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {selectableRoles.map((role) => {
-                    const isChecked = createForm.roles.includes(role.name);
-                    return (
-                      <div
-                        key={role.name}
-                        onClick={() => toggleRoleSelection(role.name, true)}
-                        className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${isChecked
-                            ? "border-locatel-medio bg-locatel-medio/5 dark:bg-locatel-medio/10 shadow-xs"
-                            : "border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-                          }`}
-                      >
-                        <div className="flex items-center justify-between font-bold text-neutral-900 dark:text-neutral-100 mb-1">
-                          <span>{role.display_name}</span>
-                          <div
-                            className={`w-4 h-4 rounded-md flex items-center justify-center border ${isChecked
-                                ? "bg-locatel-medio border-locatel-medio text-white"
-                                : "border-neutral-300 dark:border-neutral-600"
-                              }`}
-                          >
-                            {isChecked && <Check className="w-3 h-3" />}
-                          </div>
-                        </div>
-                        <p className="text-[11px] text-neutral-500 leading-relaxed">
-                          {role.description}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                      Matriz de Permisos Puntuales
-                    </label>
-                    <span className="text-[11px] text-neutral-400">
-                      Permite otorgar o restringir accesos granulares independientemente de los roles.
-                    </span>
-                  </div>
-                  <span className="text-xs font-bold font-mono text-locatel-medio">
-                    {createForm.permissions.length} de {availablePermissions.length} seleccionados
-                  </span>
-                </div>
-
-                <div className="space-y-3 bg-neutral-50 dark:bg-neutral-800/40 p-3.5 rounded-2xl border border-neutral-200 dark:border-neutral-700">
-                  {Array.from(permissionsByModule.entries()).map(([moduleName, perms]) => {
-                    const allSelected = perms.every((p) =>
-                      createForm.permissions.includes(p.code)
-                    );
-                    return (
-                      <div
-                        key={moduleName}
-                        className="bg-white dark:bg-neutral-900 p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 space-y-2"
-                      >
-                        <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100 dark:border-neutral-800">
-                          <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
-                            <Layers className="w-3.5 h-3.5 text-locatel-medio" />
-                            {moduleName}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => toggleModulePermissions(moduleName, true)}
-                            className="text-[11px] text-locatel-medio font-semibold hover:underline cursor-pointer"
-                          >
-                            {allSelected ? "Deseleccionar módulo" : "Seleccionar todo"}
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {perms.map((p) => {
-                            const isPermChecked = createForm.permissions.includes(p.code);
-                            return (
-                              <label
-                                key={p.code}
-                                className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${isPermChecked
-                                    ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30"
-                                    : "border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
-                                  }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isPermChecked}
-                                  onChange={() => togglePermissionSelection(p.code, true)}
-                                  className="mt-0.5 rounded text-locatel-medio focus:ring-locatel-medio cursor-pointer"
-                                />
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-neutral-900 dark:text-neutral-100">
-                                    {p.name}
-                                  </div>
-                                  <div className="text-[10px] text-neutral-500 leading-tight">
-                                    {p.description}
-                                  </div>
-                                </div>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-100 dark:border-neutral-800">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={
-                    isSubmitting ||
-                    (!!createForm.confirmPassword &&
-                      createForm.password !== createForm.confirmPassword)
-                  }
-                  className="flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-xl bg-locatel-medio hover:bg-locatel-oscuro text-white cursor-pointer disabled:opacity-50"
-                >
-                  {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                  <span>Crear Usuario</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isEditOpen && selectedUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
-          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-5 my-8 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-100 dark:border-neutral-800">
-              <div className="flex items-center gap-2">
-                <Edit className="w-5 h-5 text-locatel-medio" />
-                <div>
-                  <h3 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
-                    Editar Usuario y Matriz de Permisos
-                  </h3>
-                  <p className="text-xs text-neutral-500">
-                    Modificación de credenciales, elevación a Coordinador/Admin y asignación granular.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsEditOpen(false)}
-                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleEditSubmit} className="space-y-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                    Nombre
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editForm.name}
-                    onChange={(e) =>
-                      setEditForm({ ...editForm, name: e.target.value })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                    Apellido
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editForm.lastName}
-                    onChange={(e) =>
-                      setEditForm({ ...editForm, lastName: e.target.value })
-                    }
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                  Correo Electrónico Corporativo
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={editForm.email}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, email: e.target.value })
-                  }
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                    Nueva Contraseña (opcional)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="••••••••"
-                      value={editForm.password}
-                      onChange={(e) =>
-                        setEditForm({ ...editForm, password: e.target.value })
-                      }
-                      className="w-full pl-3 pr-9 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
-                    Confirmar Nueva Contraseña
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="••••••••"
-                      value={editForm.confirmPassword}
-                      onChange={(e) =>
-                        setEditForm({ ...editForm, confirmPassword: e.target.value })
-                      }
-                      className={`w-full pl-3 pr-9 py-2 text-xs rounded-xl border bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 transition-all ${editForm.password &&
-                          editForm.confirmPassword &&
-                          editForm.password !== editForm.confirmPassword
-                          ? "border-red-500 focus:ring-red-400"
-                          : "border-neutral-300 dark:border-neutral-700 focus:ring-locatel-medio"
-                        }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  {editForm.password &&
-                    editForm.confirmPassword &&
-                    editForm.password !== editForm.confirmPassword && (
-                      <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1">
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        Las contraseñas no coinciden
-                      </p>
-                    )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
-                  Roles Asignados (Elevar a Coordinador o Administrador)
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  {selectableRoles.map((role) => {
-                    const isChecked = editForm.roles.includes(role.name);
-                    return (
-                      <div
-                        key={role.name}
-                        onClick={() => toggleRoleSelection(role.name, false)}
-                        className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${isChecked
-                            ? "border-locatel-medio bg-locatel-medio/5 dark:bg-locatel-medio/10 shadow-xs"
-                            : "border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-                          }`}
-                      >
-                        <div className="flex items-center justify-between font-bold text-neutral-900 dark:text-neutral-100 mb-1">
-                          <span>{role.display_name}</span>
-                          <div
-                            className={`w-4 h-4 rounded-md flex items-center justify-center border ${isChecked
-                                ? "bg-locatel-medio border-locatel-medio text-white"
-                                : "border-neutral-300 dark:border-neutral-600"
-                              }`}
-                          >
-                            {isChecked && <Check className="w-3 h-3" />}
-                          </div>
-                        </div>
-                        <p className="text-[11px] text-neutral-500 leading-relaxed">
-                          {role.description}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300">
-                      Matriz de Permisos Puntuales
-                    </label>
-                    <span className="text-[11px] text-neutral-400">
-                      Permisos asignados directamente al usuario independientemente de sus roles.
-                    </span>
-                  </div>
-                  <span className="text-xs font-bold font-mono text-locatel-medio">
-                    {editForm.permissions.length} de {availablePermissions.length} seleccionados
-                  </span>
-                </div>
-
-                <div className="space-y-3 bg-neutral-50 dark:bg-neutral-800/40 p-3.5 rounded-2xl border border-neutral-200 dark:border-neutral-700">
-                  {Array.from(permissionsByModule.entries()).map(([moduleName, perms]) => {
-                    const allSelected = perms.every((p) =>
-                      editForm.permissions.includes(p.code)
-                    );
-                    return (
-                      <div
-                        key={moduleName}
-                        className="bg-white dark:bg-neutral-900 p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 space-y-2"
-                      >
-                        <div className="flex items-center justify-between pb-1.5 border-b border-neutral-100 dark:border-neutral-800">
-                          <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
-                            <Layers className="w-3.5 h-3.5 text-locatel-medio" />
-                            {moduleName}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => toggleModulePermissions(moduleName, false)}
-                            className="text-[11px] text-locatel-medio font-semibold hover:underline cursor-pointer"
-                          >
-                            {allSelected ? "Deseleccionar módulo" : "Seleccionar todo"}
-                          </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {perms.map((p) => {
-                            const isPermChecked = editForm.permissions.includes(p.code);
-                            return (
-                              <label
-                                key={p.code}
-                                className={`flex items-start gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-colors ${isPermChecked
-                                    ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30"
-                                    : "border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
-                                  }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isPermChecked}
-                                  onChange={() => togglePermissionSelection(p.code, false)}
-                                  className="mt-0.5 rounded text-locatel-medio focus:ring-locatel-medio cursor-pointer"
-                                />
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-neutral-900 dark:text-neutral-100">
-                                    {p.name}
-                                  </div>
-                                  <div className="text-[10px] text-neutral-500 leading-tight">
-                                    {p.description}
-                                  </div>
-                                </div>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                <label className="flex items-center gap-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editForm.isActive}
-                    onChange={(e) =>
-                      setEditForm({ ...editForm, isActive: e.target.checked })
-                    }
-                    className="rounded text-locatel-medio focus:ring-locatel-medio cursor-pointer"
-                  />
-                  <span>Usuario Activo en el Sistema</span>
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-100 dark:border-neutral-800">
-                <button
-                  type="button"
-                  onClick={() => setIsEditOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={
-                    isSubmitting ||
-                    (!!editForm.password &&
-                      editForm.password !== editForm.confirmPassword)
-                  }
-                  className="flex items-center gap-2 px-5 py-2 text-xs font-semibold rounded-xl bg-locatel-medio hover:bg-locatel-oscuro text-white cursor-pointer disabled:opacity-50"
-                >
-                  {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                  <span>Guardar Cambios</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {selectedUser && (
+        <UserModal
+          isOpen={isEditOpen}
+          onClose={() => setIsEditOpen(false)}
+          onSubmit={handleEditSubmit}
+          isEdit={true}
+          formData={editForm}
+          setFormData={setEditForm}
+          selectableRoles={selectableRoles}
+          availablePermissions={availablePermissions}
+          isSubmitting={isSubmitting}
+          onToggleRole={(roleName) => toggleRoleSelection(roleName, false)}
+          onTogglePermission={(code) => togglePermissionSelection(code, false)}
+          onToggleModulePermissions={(modName) => toggleModulePermissions(modName, false)}
+        />
       )}
     </div>
   );

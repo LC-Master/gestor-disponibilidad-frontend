@@ -17,14 +17,6 @@ export default function HistoricoPagosPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-100">
-          Cuentas por Pagar - Histórico de Pagos y Liquidaciones
-        </h1>
-        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-          Auditoría de egresos bancarios, liquidaciones por lote y archivo histórico de facturas pagadas
-        </p>
-      </div>
       <PaymentsHistoryView companies={companies} banks={banks} />
     </div>
   );

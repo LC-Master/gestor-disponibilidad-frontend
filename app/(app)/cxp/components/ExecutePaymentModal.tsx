@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, X } from "lucide-react";
+import { CheckCircle2, Loader2, X, TrendingUp, TrendingDown, ArrowRight, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import { fetchClient } from "@/lib/fetchClient";
-import { Invoice } from "../types";
+import { Invoice, DifferentialResponse } from "../types";
+import { getDifferential } from "@/lib/exchangeRates";
 
 interface BankAccountOption {
   id: string;
@@ -39,6 +40,8 @@ export function ExecutePaymentModal({
     new Date().toISOString().split("T")[0]
   );
   const [submitting, setSubmitting] = useState(false);
+  const [differential, setDifferential] = useState<DifferentialResponse | null>(null);
+  const [loadingDiff, setLoadingDiff] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !companyId) return;
@@ -66,20 +69,48 @@ export function ExecutePaymentModal({
     setReferenceNumber("");
   }, [isOpen, companyId]);
 
+  const foreignInvoice = invoices.find((inv) => inv.currency !== "VES") || invoices[0];
+
+  useEffect(() => {
+    if (!isOpen || !foreignInvoice || !paymentDate) return;
+
+    const issueDateStr = foreignInvoice.issue_date
+      ? foreignInvoice.issue_date.split("T")[0]
+      : "";
+    if (!issueDateStr) return;
+
+    const bcvCurrency = foreignInvoice.currency === "EUR" ? "Euro" : "Dolar";
+
+    const fetchDiff = async () => {
+      setLoadingDiff(true);
+      try {
+        const data = await getDifferential(bcvCurrency, issueDateStr, paymentDate);
+        setDifferential(data);
+      } catch {
+        setDifferential(null);
+      } finally {
+        setLoadingDiff(false);
+      }
+    };
+
+    fetchDiff();
+  }, [isOpen, foreignInvoice, paymentDate]);
+
   if (!isOpen) return null;
 
   let totalVES = 0;
   let totalUSD = 0;
+  let totalForeignAmount = 0;
+
   for (const inv of invoices) {
+    const amount = inv.net_amount > 0 ? inv.net_amount : inv.total_amount;
     if (inv.currency === "VES") {
-      totalVES += inv.total_amount;
-      totalUSD +=
-        inv.exchange_rate > 1.0
-          ? inv.total_amount / inv.exchange_rate
-          : inv.total_amount / 36.50;
+      totalVES += amount;
+      totalUSD += inv.exchange_rate > 1.0 ? amount / inv.exchange_rate : amount / 36.50;
     } else {
-      totalUSD += inv.total_amount;
-      totalVES += inv.total_amount * (inv.exchange_rate || 36.50);
+      totalForeignAmount += amount;
+      totalUSD += amount;
+      totalVES += amount * (inv.exchange_rate || 36.50);
     }
   }
 
@@ -89,6 +120,10 @@ export function ExecutePaymentModal({
       maximumFractionDigits: 2,
     });
   };
+
+  const differentialTotalBs = differential && totalForeignAmount > 0
+    ? totalForeignAmount * differential.absolute_difference
+    : 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,7 +176,7 @@ export function ExecutePaymentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-neutral-900 w-full max-w-xl rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white dark:bg-neutral-900 w-full max-w-xl rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto custom-scrollbar">
         <div className="px-6 py-5 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
@@ -164,7 +199,7 @@ export function ExecutePaymentModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/70 dark:border-neutral-700/60 space-y-3">
             <div className="flex items-center justify-between text-xs">
               <span className="text-neutral-500 dark:text-neutral-400">
@@ -183,13 +218,88 @@ export function ExecutePaymentModal({
                 </p>
               </div>
               <div>
-                <span className="text-[11px] text-neutral-400">Equivalente Aprox. (USD):</span>
+                <span className="text-[11px] text-neutral-400">Equivalente Divisa (USD):</span>
                 <p className="text-sm font-extrabold font-mono text-neutral-900 dark:text-neutral-100">
                   ${formatNumber(totalUSD)}
                 </p>
               </div>
             </div>
           </div>
+
+          {foreignInvoice && (
+            <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/70 dark:border-neutral-700/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200 flex items-center gap-1.5">
+                  <DollarSign className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  Cálculo de Diferencial Cambiario (BCV)
+                </span>
+                {loadingDiff && <Loader2 className="w-3.5 h-3.5 animate-spin text-neutral-400" />}
+              </div>
+
+              {differential ? (
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between py-1 border-b border-neutral-200/60 dark:border-neutral-700/60">
+                    <span className="text-neutral-500 dark:text-neutral-400">Tasa Emisión vs Pago:</span>
+                    <div className="flex items-center gap-2 font-mono font-bold">
+                      <span className="text-neutral-700 dark:text-neutral-300">
+                        Bs. {differential.issue_rate.toFixed(4)}
+                      </span>
+                      <ArrowRight className="w-3 h-3 text-neutral-400" />
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        Bs. {differential.payment_rate.toFixed(4)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 py-1">
+                    <div>
+                      <span className="text-[11px] text-neutral-400">Dif. Absoluta por Divisa:</span>
+                      <p className="font-mono font-bold text-neutral-800 dark:text-neutral-200">
+                        Bs. {differential.absolute_difference.toFixed(4)}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[11px] text-neutral-400">Variación Porcentual:</span>
+                      <p className={`font-mono font-bold flex items-center gap-1 ${
+                        differential.percentage_difference >= 0
+                          ? "text-rose-600 dark:text-rose-400"
+                          : "text-emerald-600 dark:text-emerald-400"
+                      }`}>
+                        {differential.percentage_difference >= 0 ? (
+                          <TrendingUp className="w-3.5 h-3.5" />
+                        ) : (
+                          <TrendingDown className="w-3.5 h-3.5" />
+                        )}
+                        {differential.percentage_difference >= 0 ? "+" : ""}
+                        {differential.percentage_difference.toFixed(2)}%
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-neutral-200/60 dark:border-neutral-700/60 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] text-neutral-500 font-semibold">
+                        Ajuste Cambiario Total:
+                      </span>
+                      <p className="text-[10px] text-neutral-400">
+                        {differentialTotalBs >= 0 ? "Pérdida en cambio (mayor desembolso Bs)" : "Ganancia en cambio"}
+                      </p>
+                    </div>
+                    <span className={`font-mono font-extrabold text-sm ${
+                      differentialTotalBs >= 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                    }`}>
+                      {differentialTotalBs >= 0 ? "+" : ""}
+                      Bs. {formatNumber(differentialTotalBs)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-neutral-400">
+                  {loadingDiff ? "Calculando tasas y variación..." : "Las facturas seleccionadas son en Bolívares o no requieren diferencial."}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-4">
             <div>
@@ -245,9 +355,7 @@ export function ExecutePaymentModal({
                 Fecha de Débito Bancario *
               </label>
               <input
-                type="text"
-                inputMode="numeric"
-                placeholder="YYYY-MM-DD"
+                type="date"
                 value={paymentDate}
                 onChange={(e) => setPaymentDate(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-xs font-mono text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/20 focus:border-locatel-medio"

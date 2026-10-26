@@ -53,7 +53,7 @@ export default function ForgotPasswordPage() {
                         Recuperar Contraseña
                     </h1>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                        Gestor de Facturación • Pasivos y Tesorería
+                        Gestor de Disponibilidad • Pasivos y Tesorería
                     </p>
                 </div>
 

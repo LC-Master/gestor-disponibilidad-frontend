@@ -12,10 +12,10 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "Gestor de Facturación",
-    template: "%s | Gestor de Facturación",
+    default: "Gestor de Disponibilidad",
+    template: "%s | Gestor de Disponibilidad",
   },
-  description: "Gestor de facturación y tesorería",
+  description: "Gestor de Disponibilidad",
 };
 
 export default function RootLayout({

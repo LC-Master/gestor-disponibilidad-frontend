@@ -33,6 +33,7 @@ interface MonthlyHistoryMatrixProps {
 
 type AccountMonthlyRow = {
   account_id: string;
+  company_name: string;
   bank_name: string;
   bank_code: string;
   terminal_code: string;
@@ -49,7 +50,7 @@ export function MonthlyHistoryMatrix({
   accounts,
 }: MonthlyHistoryMatrixProps) {
   const currentDate = useMemo(() => new Date(), []);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("ALL");
   const [selectedCurrency, setSelectedCurrency] = useState<"VES" | "USD" | "EUR">("VES");
   const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth() + 1);
@@ -61,26 +62,34 @@ export function MonthlyHistoryMatrix({
   const [hoveredDay, setHoveredDay] = useState<number | null>(null);
 
   useEffect(() => {
-    if (companies.length > 0 && !selectedCompanyId) {
-      setSelectedCompanyId(companies[0].id);
+    if (!selectedCompanyId) {
+      setSelectedCompanyId("ALL");
     }
-  }, [companies, selectedCompanyId]);
+  }, [selectedCompanyId]);
 
   const daysInMonth = useMemo(() => {
     return new Date(selectedYear, selectedMonth, 0).getDate();
   }, [selectedYear, selectedMonth]);
 
+  const companyMap = useMemo(() => {
+    const map = new Map<string, Company>();
+    companies.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [companies]);
+
   const fetchHistory = async () => {
-    if (!selectedCompanyId) return;
     setLoading(true);
     try {
       const monthStr = String(selectedMonth).padStart(2, "0");
       const startDate = `${selectedYear}-${monthStr}-01`;
       const endDate = `${selectedYear}-${monthStr}-${String(daysInMonth).padStart(2, "0")}`;
 
-      const res = await fetchClient(
-        `/api/v1/treasury/companies/${selectedCompanyId}/history?start=${startDate}&end=${endDate}`
-      );
+      const url =
+        selectedCompanyId && selectedCompanyId !== "ALL"
+          ? `/api/v1/treasury/companies/${selectedCompanyId}/history?start=${startDate}&end=${endDate}`
+          : `/api/v1/treasury/history?start=${startDate}&end=${endDate}`;
+
+      const res = await fetchClient(url);
       if (res.ok) {
         const data = await res.json();
         setHistoryData(Array.isArray(data) ? data : []);
@@ -97,13 +106,11 @@ export function MonthlyHistoryMatrix({
   }, [selectedCompanyId, selectedYear, selectedMonth, daysInMonth]);
 
   const filteredAccounts = useMemo(() => {
-    if (!selectedCompanyId) return [];
-    return accounts.filter(
-      (acc) =>
-        acc.company_id === selectedCompanyId &&
-        acc.currency === selectedCurrency &&
-        acc.is_active
-    );
+    return accounts.filter((acc) => {
+      const matchesCompany =
+        !selectedCompanyId || selectedCompanyId === "ALL" || acc.company_id === selectedCompanyId;
+      return matchesCompany && acc.currency === selectedCurrency && acc.is_active;
+    });
   }, [accounts, selectedCompanyId, selectedCurrency]);
 
   const matrixRows = useMemo<AccountMonthlyRow[]>(() => {
@@ -121,8 +128,10 @@ export function MonthlyHistoryMatrix({
     });
 
     return filteredAccounts.map((account) => {
+      const comp = companyMap.get(account.company_id);
       const row: AccountMonthlyRow = {
         account_id: account.id,
+        company_name: comp?.name || "",
         bank_name: account.bank?.name || "Banco",
         bank_code: account.bank?.code || "",
         terminal_code: account.terminal_code,
@@ -140,7 +149,7 @@ export function MonthlyHistoryMatrix({
 
       return row;
     });
-  }, [filteredAccounts, historyData, daysInMonth]);
+  }, [filteredAccounts, historyData, daysInMonth, companyMap]);
 
   const dailyTotals = useMemo(() => {
     const totals: Record<number, { sum: number; count: number }> = {};
@@ -241,13 +250,18 @@ export function MonthlyHistoryMatrix({
               {info.getValue().charAt(0)}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="font-semibold text-xs text-neutral-900 dark:text-neutral-100 truncate">
                   {info.getValue()}
                 </span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700">
                   {info.row.original.terminal_code}
                 </span>
+                {info.row.original.company_name && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+                    {info.row.original.company_name}
+                  </span>
+                )}
               </div>
               <p className="text-[11px] text-neutral-500 truncate mt-0.5">
                 {info.row.original.account_alias}
@@ -539,6 +553,7 @@ export function MonthlyHistoryMatrix({
             onChange={(e) => setSelectedCompanyId(e.target.value)}
             className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
           >
+            <option value="ALL">Todas las empresas</option>
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} ({c.code})

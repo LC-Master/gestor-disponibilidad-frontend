@@ -27,7 +27,7 @@ interface CxpCalendarViewProps {
 
 export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
 
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(companies[0]?.id || "");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("ALL");
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [calendarData, setCalendarData] = useState<CalendarDayAggregate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -39,10 +39,10 @@ export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
   const month = currentDate.getMonth() + 1;
 
   useEffect(() => {
-    if (!selectedCompanyId && companies.length > 0) {
-      setSelectedCompanyId(companies[0].id);
+    if (!selectedCompanyId) {
+      setSelectedCompanyId("ALL");
     }
-  }, [companies, selectedCompanyId]);
+  }, [selectedCompanyId]);
 
   const loadSuppliers = async () => {
     try {
@@ -57,10 +57,10 @@ export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
   };
 
   const loadCalendar = async () => {
-    if (!selectedCompanyId) return;
     setLoading(true);
     try {
-      const res = await fetchClient(`/api/cxp/calendar?company_id=${selectedCompanyId}&year=${year}&month=${month}`);
+      const companyParam = selectedCompanyId && selectedCompanyId !== "ALL" ? selectedCompanyId : "ALL";
+      const res = await fetchClient(`/api/cxp/calendar?company_id=${companyParam}&year=${year}&month=${month}`);
       if (!res.ok) throw new Error("Error al consultar calendario de CXP");
       const data = await res.json();
       setCalendarData(Array.isArray(data) ? data : []);
@@ -217,6 +217,7 @@ export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
               onChange={(e) => setSelectedCompanyId(e.target.value)}
               className="px-3 py-2 text-xs font-semibold rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-locatel-medio cursor-pointer"
             >
+              <option value="ALL">Todas las empresas</option>
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -362,6 +363,23 @@ export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
 
                   {hasInvoices && (
                     <div className="mt-2 space-y-0.5">
+                      {selectedCompanyId === "ALL" && (
+                        <div className="flex flex-wrap gap-1 mb-1">
+                          {Array.from(new Set(day.invoices.map((i) => i.company?.name || i.company_id))).slice(0, 2).map((compName, cIdx) => (
+                            <span
+                              key={cIdx}
+                              className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 truncate max-w-full block"
+                            >
+                              {String(compName)}
+                            </span>
+                          ))}
+                          {new Set(day.invoices.map((i) => i.company?.name || i.company_id)).size > 2 && (
+                            <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500">
+                              +{new Set(day.invoices.map((i) => i.company?.name || i.company_id)).size - 2}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <p className={`text-xs font-extrabold font-mono truncate ${amountTextPrimary}`}>
                         $ {formatNumber(day.total_usd)}
                       </p>
@@ -412,23 +430,29 @@ export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
-                          {inv.supplier?.business_name || "Proveedor"}
-                        </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-neutral-900 dark:text-neutral-100">
+                            {inv.supplier?.business_name || "Proveedor"}
+                          </span>
+                          {inv.company?.name && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+                              {inv.company.name}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[11px] text-neutral-400 font-mono">
                           {inv.supplier?.rif || ""} | N° {inv.invoice_number}
                         </p>
                       </div>
 
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${inv.sap_document_type === "MIRO"
-                          ? "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300"
-                          : inv.sap_document_type === "MRKO"
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          (inv.supplier?.supplier_type || "FIRME") === "CONSIGNACION"
                             ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300"
                             : "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300"
-                          }`}
+                        }`}
                       >
-                        {inv.sap_document_type}
+                        {inv.supplier?.supplier_type || "FIRME"}
                       </span>
                     </div>
 

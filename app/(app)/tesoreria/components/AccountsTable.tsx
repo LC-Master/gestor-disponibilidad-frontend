@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -11,13 +11,16 @@ import {
   Landmark,
   Plus,
   Search,
-  Wallet,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchClient } from "@/lib/fetchClient";
 import { Bank, BankAccount, Company } from "../types";
+import { useTreasury } from "../context";
 import { companySchema, bankSchema, bankAccountSchema } from "@/schemas/treasury";
+import { z } from "zod"
+import { useFormState } from "@/hooks/useFormState";
 
 interface AccountsTableProps {
   accounts: BankAccount[];
@@ -30,6 +33,29 @@ interface AccountsTableProps {
 
 type SortField = "bank" | "alias" | "terminal" | "currency" | "balance";
 type SortDirection = "asc" | "desc";
+
+const INITIAL_ACCOUNT = {
+  company_id: "",
+  bank_id: "",
+  account_alias: "",
+  account_number: "",
+  terminal_code: "",
+  currency: "VES",
+  account_type: "CORRIENTE",
+  initial_balance: "0",
+};
+
+const INITIAL_COMPANY = {
+  code: "",
+  name: "",
+  rif: "",
+};
+
+const INITIAL_BANK = {
+  code: "",
+  name: "",
+  is_cash: false,
+};
 
 export function AccountsTable({
   accounts,
@@ -48,37 +74,49 @@ export function AccountsTable({
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 10;
 
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (selectedCompany !== "all") count++;
+    if (selectedBank !== "all") count++;
+    if (selectedCurrency !== "all") count++;
+    return count;
+  }, [selectedCompany, selectedBank, selectedCurrency]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
+        setIsFilterOpen(false);
+      }
+    };
+    if (isFilterOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isFilterOpen]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
   const [isBankModalOpen, setIsBankModalOpen] = useState(false);
 
-  const [newAccount, setNewAccount] = useState({
-    company_id: "",
-    bank_id: "",
-    account_alias: "",
-    account_number: "",
-    terminal_code: "",
-    currency: "VES",
-    account_type: "CORRIENTE",
-    initial_balance: "0",
-  });
-
-  const [newCompany, setNewCompany] = useState({
-    code: "",
-    name: "",
-    rif: "",
-  });
-
-  const [newBank, setNewBank] = useState({
-    code: "",
-    name: "",
-    is_cash: false,
-  });
+  const accountForm = useFormState(INITIAL_ACCOUNT);
+  const companyForm = useFormState(INITIAL_COMPANY);
+  const bankForm = useFormState(INITIAL_BANK);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [accountErrors, setAccountErrors] = useState<Record<string, string>>({});
-  const [companyErrors, setCompanyErrors] = useState<Record<string, string>>({});
-  const [bankErrors, setBankErrors] = useState<Record<string, string>>({});
+  const { user } = useTreasury();
+
+  const canManageAccounts = useMemo(() => {
+    if (!user) return false;
+    const roles = (user.roles || []).map((r) => r.toUpperCase().trim());
+    if (roles.includes("ADMIN") || roles.includes("ADMINISTRADOR")) return true;
+    const perms = (user.permissions || []).map((p) => p.toLowerCase().trim());
+    return perms.includes("treasury.accounts.manage");
+  }, [user]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -174,27 +212,21 @@ export function AccountsTable({
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAccountErrors({});
-    const selectedBankObj = banks.find((b) => b.id === newAccount.bank_id);
+    accountForm.setErrors({});
+    const selectedBankObj = banks.find((b) => b.id === accountForm.values.bank_id);
     const parsed = bankAccountSchema.safeParse({
-      company_id: newAccount.company_id,
-      bank_id: newAccount.bank_id,
-      account_alias: newAccount.account_alias,
-      account_number: newAccount.account_number,
-      terminal_code: newAccount.terminal_code,
-      currency: newAccount.currency,
-      account_type: newAccount.account_type,
+      company_id: accountForm.values.company_id,
+      bank_id: accountForm.values.bank_id,
+      account_alias: accountForm.values.account_alias,
+      account_number: accountForm.values.account_number,
+      terminal_code: accountForm.values.terminal_code,
+      currency: accountForm.values.currency,
+      account_type: accountForm.values.account_type,
       is_cash: selectedBankObj?.is_cash ?? false,
     });
     if (!parsed.success) {
-      const errMap: Record<string, string> = {};
-      parsed.error.issues.forEach((issue) => {
-        const key = issue.path[0] as string;
-        if (key && !errMap[key]) {
-          errMap[key] = issue.message;
-        }
-      });
-      setAccountErrors(errMap);
+      const flattened = z.flattenError(parsed.error)
+      accountForm.setErrors(flattened.fieldErrors);
       return;
     }
     setIsSubmitting(true);
@@ -210,29 +242,25 @@ export function AccountsTable({
           terminal_code: parsed.data.terminal_code,
           currency: parsed.data.currency,
           account_type: parsed.data.account_type,
-          initial_balance: parseFloat(newAccount.initial_balance.replace(",", ".")) || 0,
+          initial_balance: parseFloat(accountForm.values.initial_balance.replace(",", ".")) || 0,
         }),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Error al crear cuenta bancaria");
+      if (res && !res.ok) {
+        const data = await res.json().catch(() => ({}));
+        accountForm.setErrors(data);
+        return;
       }
       toast.success("Cuenta bancaria creada exitosamente");
       setIsModalOpen(false);
-      setAccountErrors({});
-      setNewAccount({
-        company_id: "",
-        bank_id: "",
-        account_alias: "",
-        account_number: "",
-        terminal_code: "",
-        currency: "VES",
-        account_type: "CORRIENTE",
-        initial_balance: "0",
-      });
+      accountForm.reset();
       onAccountCreated();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al procesar");
+    } catch (err: any) {
+      const errObj = err?.data?.errors || err?.data;
+      if (errObj && typeof errObj === "object" && Object.keys(errObj).length > 0) {
+        accountForm.setErrors(errObj);
+        return;
+      }
+      toast.error("No se pudo completar el registro. Intente nuevamente.");
     } finally {
       setIsSubmitting(false);
     }
@@ -240,17 +268,12 @@ export function AccountsTable({
 
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCompanyErrors({});
-    const parsed = companySchema.safeParse(newCompany);
+    companyForm.setErrors({});
+    const parsed = companySchema.safeParse(companyForm.values);
+
     if (!parsed.success) {
-      const errMap: Record<string, string> = {};
-      parsed.error.issues.forEach((issue) => {
-        const key = issue.path[0] as string;
-        if (key && !errMap[key]) {
-          errMap[key] = issue.message;
-        }
-      });
-      setCompanyErrors(errMap);
+      const flattened = z.flattenError(parsed.error);
+      companyForm.setErrors(flattened.fieldErrors);
       return;
     }
     setIsSubmitting(true);
@@ -258,19 +281,26 @@ export function AccountsTable({
       const res = await fetchClient("/api/v1/treasury/companies", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed.data),
+        body: JSON.stringify(companyForm.values),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Error al crear empresa");
+
+      if (res && !res.ok) {
+        const data = await res.json().catch(() => ({}));
+        companyForm.setErrors(data);
+        return;
       }
+
       toast.success("Empresa creada exitosamente");
       setIsCompanyModalOpen(false);
-      setCompanyErrors({});
-      setNewCompany({ code: "", name: "", rif: "" });
+      companyForm.reset();
       onCompanyCreated();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al procesar");
+    } catch (err: any) {
+      const errObj = err?.data?.errors || err?.data;
+      if (errObj && typeof errObj === "object" && Object.keys(errObj).length > 0) {
+        companyForm.setErrors(errObj);
+        return;
+      }
+      toast.error("No se pudo completar el registro. Intente nuevamente.");
     } finally {
       setIsSubmitting(false);
     }
@@ -278,19 +308,14 @@ export function AccountsTable({
 
   const handleCreateBank = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBankErrors({});
-    const parsed = bankSchema.safeParse(newBank);
+    bankForm.setErrors({});
+    const parsed = bankSchema.safeParse(bankForm.values);
     if (!parsed.success) {
-      const errMap: Record<string, string> = {};
-      parsed.error.issues.forEach((issue) => {
-        const key = issue.path[0] as string;
-        if (key && !errMap[key]) {
-          errMap[key] = issue.message;
-        }
-      });
-      setBankErrors(errMap);
+      const flattened = z.flattenError(parsed.error);
+      bankForm.setErrors(flattened.fieldErrors);
       return;
     }
+
     setIsSubmitting(true);
     try {
       const res = await fetchClient("/api/v1/treasury/banks", {
@@ -298,17 +323,24 @@ export function AccountsTable({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed.data),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || "Error al crear banco");
+
+      if (res && !res.ok) {
+        const data = await res.json().catch(() => ({}));
+        bankForm.setErrors(data);
+        return;
       }
+
       toast.success("Banco creado exitosamente");
       setIsBankModalOpen(false);
-      setBankErrors({});
-      setNewBank({ code: "", name: "", is_cash: false });
+      bankForm.reset();
       onBankCreated();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al procesar");
+    } catch (err: any) {
+      const errObj = err?.data?.errors || err?.data;
+      if (errObj && typeof errObj === "object" && Object.keys(errObj).length > 0) {
+        bankForm.setErrors(errObj);
+        return;
+      }
+      toast.error("No se pudo completar el registro. Intente nuevamente.");
     } finally {
       setIsSubmitting(false);
     }
@@ -316,47 +348,9 @@ export function AccountsTable({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-locatel-medio" />
-            Catálogo de Cuentas Bancarias
-          </h2>
-          <p className="text-xs text-neutral-500 mt-1">
-            Visualiza y administra las cuentas, terminales y saldos operativos.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setIsCompanyModalOpen(true)}
-            className="flex items-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 transition-colors cursor-pointer"
-          >
-            <Building2 className="w-4 h-4" />
-            + Empresa
-          </button>
-
-          <button
-            onClick={() => setIsBankModalOpen(true)}
-            className="flex items-center gap-2 px-3.5 py-2.5 text-xs sm:text-sm font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 transition-colors cursor-pointer"
-          >
-            <Landmark className="w-4 h-4" />
-            + Banco
-          </button>
-
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-4.5 py-2.5 text-xs sm:text-sm font-semibold rounded-xl bg-locatel-medio hover:bg-locatel-oscuro text-white shadow-sm transition-all cursor-pointer"
-          >
-            <Plus className="w-4.5 h-4.5" />
-            Nueva Cuenta
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-sm">
-        <div className="relative">
-          <Search className="w-4.5 h-4.5 absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+      <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white dark:bg-neutral-900 p-2.5 sm:p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 shadow-2xs">
+        <div className="relative flex-1 min-w-60 max-w-md">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
           <input
             type="text"
             placeholder="Buscar por alias, terminal, banco..."
@@ -365,60 +359,176 @@ export function AccountsTable({
               setGlobalFilter(e.target.value);
               setCurrentPage(1);
             }}
-            className="w-full pl-10 pr-3.5 py-2.5 text-xs sm:text-sm rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30"
+            className="w-full pl-9 pr-3 h-9 border border-neutral-300 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/80 bg-neutral-50/50 dark:bg-neutral-950 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none transition-all shadow-2xs"
           />
         </div>
 
-        <div>
-          <select
-            value={selectedCompany}
-            onChange={(e) => {
-              setSelectedCompany(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 text-neutral-800 dark:text-neutral-200 cursor-pointer"
-          >
-            <option value="all">Todas las Empresas</option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.code})
-              </option>
-            ))}
-          </select>
-        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 px-2.5 h-9 bg-neutral-50/50 dark:bg-neutral-950 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs shadow-2xs">
+            <Building2 className="w-3.5 h-3.5 text-locatel-medio shrink-0" />
+            <select
+              value={selectedCompany}
+              onChange={(e) => {
+                setSelectedCompany(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="bg-transparent border-none text-xs font-semibold text-neutral-800 dark:text-neutral-200 focus:outline-none cursor-pointer max-w-44 truncate"
+            >
+              <option value="all">Todas las empresas</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.code ? `${c.code} · ${c.name}` : c.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div>
-          <select
-            value={selectedBank}
-            onChange={(e) => {
-              setSelectedBank(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 text-neutral-800 dark:text-neutral-200 cursor-pointer"
-          >
-            <option value="all">Todos los Bancos</option>
-            {banks.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        </div>
+          <div className="relative" ref={filterRef}>
+            <button
+              type="button"
+              onClick={() => setIsFilterOpen(!isFilterOpen)}
+              className={`h-9 px-3 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ${activeFilterCount > 0
+                ? "border-locatel-medio bg-locatel-medio text-white"
+                : "border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Filtros</span>
+              {activeFilterCount > 0 && (
+                <span className="w-4 h-4 rounded-full text-[10px] font-mono flex items-center justify-center bg-white text-locatel-oscuro font-bold">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
 
-        <div>
-          <select
-            value={selectedCurrency}
-            onChange={(e) => {
-              setSelectedCurrency(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 text-neutral-800 dark:text-neutral-200 cursor-pointer"
-          >
-            <option value="all">Todas las Monedas</option>
-            <option value="VES">VES (Bolívares)</option>
-            <option value="USD">USD (Dólares)</option>
-            <option value="EUR">EUR (Euros)</option>
-          </select>
+            {isFilterOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-80 p-3.5 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 shadow-xl z-30 space-y-3 animate-in fade-in zoom-in-95 duration-100 text-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-neutral-100 dark:border-neutral-900">
+                  <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                    Filtros de cuentas
+                  </span>
+                  {activeFilterCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCompany("all");
+                        setSelectedBank("all");
+                        setSelectedCurrency("all");
+                        setCurrentPage(1);
+                      }}
+                      className="text-[11px] text-locatel-medio hover:underline cursor-pointer font-medium"
+                    >
+                      Restablecer
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] font-medium text-neutral-500 mb-1">
+                      Empresa
+                    </label>
+                    <select
+                      value={selectedCompany}
+                      onChange={(e) => {
+                        setSelectedCompany(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer truncate"
+                    >
+                      <option value="all">Todas las Empresas</option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.code ? `${c.code} · ${c.name}` : c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-neutral-500 mb-1">
+                      Banco
+                    </label>
+                    <select
+                      value={selectedBank}
+                      onChange={(e) => {
+                        setSelectedBank(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer truncate"
+                    >
+                      <option value="all">Todos los Bancos</option>
+                      {banks.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-neutral-500 mb-1">
+                      Moneda
+                    </label>
+                    <select
+                      value={selectedCurrency}
+                      onChange={(e) => {
+                        setSelectedCurrency(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer"
+                    >
+                      <option value="all">Todas las Monedas</option>
+                      <option value="VES">VES (Bolívares)</option>
+                      <option value="USD">USD (Dólares)</option>
+                      <option value="EUR">EUR (Euros)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-neutral-100 dark:border-neutral-900 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsFilterOpen(false)}
+                    className="px-3 py-1 bg-locatel-medio text-white hover:bg-locatel-oscuro rounded-md text-xs font-medium cursor-pointer transition-colors"
+                  >
+                    Aplicar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {canManageAccounts && (
+            <>
+              <button
+                type="button"
+                onClick={() => setIsCompanyModalOpen(true)}
+                className="h-9 px-3 text-xs font-medium border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 hover:bg-neutral-50 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <Building2 className="w-3.5 h-3.5 text-neutral-500" />
+                <span>+ Empresa</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsBankModalOpen(true)}
+                className="h-9 px-3 text-xs font-medium border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 hover:bg-neutral-50 dark:hover:bg-neutral-900 text-neutral-700 dark:text-neutral-200 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <Landmark className="w-3.5 h-3.5 text-neutral-500" />
+                <span>+ Banco</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(true)}
+                className="h-9 px-3.5 text-xs font-semibold bg-locatel-medio hover:bg-locatel-oscuro text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Nueva Cuenta</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -579,13 +689,12 @@ export function AccountsTable({
 
                     <td className="px-4 py-3.5">
                       <span
-                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                          item.currency === "VES"
-                            ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
-                            : item.currency === "USD"
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${item.currency === "VES"
+                          ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
+                          : item.currency === "USD"
                             ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800"
                             : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700"
-                        }`}
+                          }`}
                       >
                         {item.currency}
                       </span>
@@ -609,11 +718,10 @@ export function AccountsTable({
 
                     <td className="px-4 py-3.5">
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          item.is_active
-                            ? "bg-green-100 dark:bg-green-950/50 text-green-800 dark:text-green-300"
-                            : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"
-                        }`}
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.is_active
+                          ? "bg-green-100 dark:bg-green-950/50 text-green-800 dark:text-green-300"
+                          : "bg-neutral-100 dark:bg-neutral-800 text-neutral-500"
+                          }`}
                       >
                         {item.is_active ? "Activa" : "Inactiva"}
                       </span>
@@ -659,7 +767,7 @@ export function AccountsTable({
             <button
               onClick={() => {
                 setIsModalOpen(false);
-                setAccountErrors({});
+                accountForm.reset();
               }}
               className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
             >
@@ -677,21 +785,18 @@ export function AccountsTable({
                     Empresa *
                   </label>
                   <select
-                    value={newAccount.company_id}
+                    value={accountForm.values.company_id}
                     onChange={(e) => {
-                      setNewAccount({
-                        ...newAccount,
+                      accountForm.setValues({
+                        ...accountForm.values,
                         company_id: e.target.value,
                       });
-                      if (accountErrors.company_id) {
-                        setAccountErrors((prev) => ({ ...prev, company_id: "" }));
-                      }
+                      accountForm.setErrors((prev) => ({ ...prev, company_id: [] }));
                     }}
-                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                      accountErrors.company_id
-                        ? "border-rose-500 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700"
-                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.company_id?.[0]
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                      } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   >
                     <option value="">Seleccione...</option>
                     {companies.map((c) => (
@@ -700,8 +805,8 @@ export function AccountsTable({
                       </option>
                     ))}
                   </select>
-                  {accountErrors.company_id && (
-                    <p className="text-rose-600 text-xs mt-1">{accountErrors.company_id}</p>
+                  {accountForm.errors.company_id && (
+                    <p className="text-rose-600 text-xs mt-1">{accountForm.errors.company_id[0]}</p>
                   )}
                 </div>
 
@@ -710,18 +815,17 @@ export function AccountsTable({
                     Banco *
                   </label>
                   <select
-                    value={newAccount.bank_id}
+                    value={accountForm.values.bank_id}
                     onChange={(e) => {
-                      setNewAccount({ ...newAccount, bank_id: e.target.value });
-                      if (accountErrors.bank_id) {
-                        setAccountErrors((prev) => ({ ...prev, bank_id: "" }));
+                      accountForm.setValues({ ...accountForm.values, bank_id: e.target.value });
+                      if (accountForm.errors.bank_id) {
+                        accountForm.setErrors((prev) => ({ ...prev, bank_id: [] }));
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                      accountErrors.bank_id
-                        ? "border-rose-500 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700"
-                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.bank_id
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                      } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   >
                     <option value="">Seleccione...</option>
                     {banks.map((b) => (
@@ -730,8 +834,8 @@ export function AccountsTable({
                       </option>
                     ))}
                   </select>
-                  {accountErrors.bank_id && (
-                    <p className="text-rose-600 text-xs mt-1">{accountErrors.bank_id}</p>
+                  {accountForm.errors.bank_id && (
+                    <p className="text-rose-600 text-xs mt-1">{accountForm.errors.bank_id[0]}</p>
                   )}
                 </div>
               </div>
@@ -744,24 +848,23 @@ export function AccountsTable({
                   <input
                     type="text"
                     placeholder="Ej. Banesco Operativa"
-                    value={newAccount.account_alias}
+                    value={accountForm.values.account_alias}
                     onChange={(e) => {
-                      setNewAccount({
-                        ...newAccount,
+                      accountForm.setValues({
+                        ...accountForm.values,
                         account_alias: e.target.value,
                       });
-                      if (accountErrors.account_alias) {
-                        setAccountErrors((prev) => ({ ...prev, account_alias: "" }));
+                      if (accountForm.errors.account_alias) {
+                        accountForm.setErrors((prev) => ({ ...prev, account_alias: [] }));
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                      accountErrors.account_alias
-                        ? "border-rose-500 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700"
-                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.account_alias
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                      } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   />
-                  {accountErrors.account_alias && (
-                    <p className="text-rose-600 text-xs mt-1">{accountErrors.account_alias}</p>
+                  {accountForm.errors.account_alias && (
+                    <p className="text-rose-600 text-xs mt-1">{accountForm.errors.account_alias[0]}</p>
                   )}
                 </div>
 
@@ -772,24 +875,23 @@ export function AccountsTable({
                   <input
                     type="text"
                     placeholder="Ej. 1001 / BNS-01"
-                    value={newAccount.terminal_code}
+                    value={accountForm.values.terminal_code}
                     onChange={(e) => {
-                      setNewAccount({
-                        ...newAccount,
+                      accountForm.setValues({
+                        ...accountForm.values,
                         terminal_code: e.target.value,
                       });
-                      if (accountErrors.terminal_code) {
-                        setAccountErrors((prev) => ({ ...prev, terminal_code: "" }));
+                      if (accountForm.errors.terminal_code) {
+                        accountForm.setErrors((prev) => ({ ...prev, terminal_code: [] }));
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                      accountErrors.terminal_code
-                        ? "border-rose-500 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700"
-                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.terminal_code
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                      } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   />
-                  {accountErrors.terminal_code && (
-                    <p className="text-rose-600 text-xs mt-1">{accountErrors.terminal_code}</p>
+                  {accountForm.errors.terminal_code && (
+                    <p className="text-rose-600 text-xs mt-1">{accountForm.errors.terminal_code[0]}</p>
                   )}
                 </div>
               </div>
@@ -803,25 +905,24 @@ export function AccountsTable({
                   inputMode="numeric"
                   maxLength={20}
                   placeholder="0134..."
-                  value={newAccount.account_number}
+                  value={accountForm.values.account_number}
                   onChange={(e) => {
                     const val = e.target.value.replace(/\D/g, "");
-                    setNewAccount({
-                      ...newAccount,
+                    accountForm.setValues({
+                      ...accountForm.values,
                       account_number: val,
                     });
-                    if (accountErrors.account_number) {
-                      setAccountErrors((prev) => ({ ...prev, account_number: "" }));
+                    if (accountForm.errors.account_number) {
+                      accountForm.setErrors((prev) => ({ ...prev, account_number: [] }));
                     }
                   }}
-                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                    accountErrors.account_number
-                      ? "border-rose-500 focus:ring-rose-500/30"
-                      : "border-neutral-200 dark:border-neutral-700"
-                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.account_number?.[0]
+                    ? "border-rose-500 focus:ring-rose-500/30"
+                    : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
-                {accountErrors.account_number && (
-                  <p className="text-rose-600 text-xs mt-1">{accountErrors.account_number}</p>
+                {accountForm.errors.account_number && (
+                  <p className="text-rose-600 text-xs mt-1">{accountForm.errors.account_number[0]}</p>
                 )}
               </div>
 
@@ -831,25 +932,24 @@ export function AccountsTable({
                     Moneda *
                   </label>
                   <select
-                    value={newAccount.currency}
+                    value={accountForm.values.currency}
                     onChange={(e) => {
-                      setNewAccount({ ...newAccount, currency: e.target.value });
-                      if (accountErrors.currency) {
-                        setAccountErrors((prev) => ({ ...prev, currency: "" }));
+                      accountForm.setValues({ ...accountForm.values, currency: e.target.value });
+                      if (accountForm.errors.currency) {
+                        accountForm.setErrors((prev) => ({ ...prev, currency: [] }));
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                      accountErrors.currency
-                        ? "border-rose-500 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700"
-                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.currency
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                      } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   >
                     <option value="VES">VES</option>
                     <option value="USD">USD</option>
                     <option value="EUR">EUR</option>
                   </select>
-                  {accountErrors.currency && (
-                    <p className="text-rose-600 text-xs mt-1">{accountErrors.currency}</p>
+                  {accountForm.errors.currency && (
+                    <p className="text-rose-600 text-xs mt-1">{accountForm.errors.currency[0]}</p>
                   )}
                 </div>
 
@@ -858,28 +958,27 @@ export function AccountsTable({
                     Tipo de Cuenta *
                   </label>
                   <select
-                    value={newAccount.account_type}
+                    value={accountForm.values.account_type}
                     onChange={(e) => {
-                      setNewAccount({
-                        ...newAccount,
+                      accountForm.setValues({
+                        ...accountForm.values,
                         account_type: e.target.value,
                       });
-                      if (accountErrors.account_type) {
-                        setAccountErrors((prev) => ({ ...prev, account_type: "" }));
+                      if (accountForm.errors.account_type) {
+                        accountForm.setErrors((prev) => ({ ...prev, account_type: [] }));
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                      accountErrors.account_type
-                        ? "border-rose-500 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700"
-                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.account_type
+                      ? "border-rose-500 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700"
+                      } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                   >
                     <option value="CORRIENTE">CORRIENTE</option>
                     <option value="AHORRO">AHORRO</option>
                     <option value="CUSTODIA">CUSTODIA</option>
                   </select>
-                  {accountErrors.account_type && (
-                    <p className="text-rose-600 text-xs mt-1">{accountErrors.account_type}</p>
+                  {accountForm.errors.account_type && (
+                    <p className="text-rose-600 text-xs mt-1">{accountForm.errors.account_type[0]}</p>
                   )}
                 </div>
 
@@ -891,12 +990,12 @@ export function AccountsTable({
                     type="text"
                     inputMode="decimal"
                     autoComplete="off"
-                    value={newAccount.initial_balance}
+                    value={accountForm.values.initial_balance}
                     onChange={(e) => {
                       const val = e.target.value;
                       if (val === "" || /^[0-9]*[.,]?[0-9]*$/.test(val)) {
-                        setNewAccount({
-                          ...newAccount,
+                        accountForm.setValues({
+                          ...accountForm.values,
                           initial_balance: val,
                         });
                       }
@@ -911,9 +1010,10 @@ export function AccountsTable({
                   type="button"
                   onClick={() => {
                     setIsModalOpen(false);
-                    setAccountErrors({});
+                    accountForm.reset();
                   }}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer
+                  dark:hover:text-black "
                 >
                   Cancelar
                 </button>
@@ -936,7 +1036,7 @@ export function AccountsTable({
             <button
               onClick={() => {
                 setIsCompanyModalOpen(false);
-                setCompanyErrors({});
+                companyForm.reset();
               }}
               className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
             >
@@ -956,21 +1056,20 @@ export function AccountsTable({
                 <input
                   type="text"
                   placeholder="Ej. LOC-01"
-                  value={newCompany.code}
+                  value={companyForm.values.code}
                   onChange={(e) => {
-                    setNewCompany({ ...newCompany, code: e.target.value });
-                    if (companyErrors.code) {
-                      setCompanyErrors((prev) => ({ ...prev, code: "" }));
+                    companyForm.setValues({ ...companyForm.values, code: e.target.value });
+                    if (companyForm.errors.code) {
+                      companyForm.setErrors((prev) => ({ ...prev, code: [] }));
                     }
                   }}
-                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                    companyErrors.code
-                      ? "border-rose-500 focus:ring-rose-500/30"
-                      : "border-neutral-200 dark:border-neutral-700"
-                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${companyForm.errors.code
+                    ? "border-rose-500 focus:ring-rose-500/30"
+                    : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
-                {companyErrors.code && (
-                  <p className="text-rose-600 text-xs mt-1">{companyErrors.code}</p>
+                {companyForm.errors.code && (
+                  <p className="text-rose-600 text-xs mt-1">{companyForm.errors.code[0]}</p>
                 )}
               </div>
 
@@ -981,21 +1080,20 @@ export function AccountsTable({
                 <input
                   type="text"
                   placeholder="Ej. Locatel Servicios C.A."
-                  value={newCompany.name}
+                  value={companyForm.values.name}
                   onChange={(e) => {
-                    setNewCompany({ ...newCompany, name: e.target.value });
-                    if (companyErrors.name) {
-                      setCompanyErrors((prev) => ({ ...prev, name: "" }));
+                    companyForm.setValues({ ...companyForm.values, name: e.target.value });
+                    if (companyForm.errors.name) {
+                      companyForm.setErrors((prev) => ({ ...prev, name: [] }));
                     }
                   }}
-                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                    companyErrors.name
-                      ? "border-rose-500 focus:ring-rose-500/30"
-                      : "border-neutral-200 dark:border-neutral-700"
-                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${companyForm.errors.name
+                    ? "border-rose-500 focus:ring-rose-500/30"
+                    : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
-                {companyErrors.name && (
-                  <p className="text-rose-600 text-xs mt-1">{companyErrors.name}</p>
+                {companyForm.errors.name && (
+                  <p className="text-rose-600 text-xs mt-1">{companyForm.errors.name[0]}</p>
                 )}
               </div>
 
@@ -1006,21 +1104,20 @@ export function AccountsTable({
                 <input
                   type="text"
                   placeholder="Ej. J-12345678-9"
-                  value={newCompany.rif}
+                  value={companyForm.values.rif}
                   onChange={(e) => {
-                    setNewCompany({ ...newCompany, rif: e.target.value });
-                    if (companyErrors.rif) {
-                      setCompanyErrors((prev) => ({ ...prev, rif: "" }));
+                    companyForm.setValues({ ...companyForm.values, rif: e.target.value });
+                    if (companyForm.errors.rif) {
+                      companyForm.setErrors((prev) => ({ ...prev, rif: [] }));
                     }
                   }}
-                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                    companyErrors.rif
-                      ? "border-rose-500 focus:ring-rose-500/30"
-                      : "border-neutral-200 dark:border-neutral-700"
-                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${companyForm.errors.rif
+                    ? "border-rose-500 focus:ring-rose-500/30"
+                    : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
-                {companyErrors.rif && (
-                  <p className="text-rose-600 text-xs mt-1">{companyErrors.rif}</p>
+                {companyForm.errors.rif && (
+                  <p className="text-rose-600 text-xs mt-1">{companyForm.errors.rif[0]}</p>
                 )}
               </div>
 
@@ -1029,9 +1126,10 @@ export function AccountsTable({
                   type="button"
                   onClick={() => {
                     setIsCompanyModalOpen(false);
-                    setCompanyErrors({});
+                    companyForm.reset();
                   }}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer
+                  dark:hover:text-black"
                 >
                   Cancelar
                 </button>
@@ -1054,7 +1152,7 @@ export function AccountsTable({
             <button
               onClick={() => {
                 setIsBankModalOpen(false);
-                setBankErrors({});
+                bankForm.reset();
               }}
               className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
             >
@@ -1076,22 +1174,21 @@ export function AccountsTable({
                   inputMode="numeric"
                   maxLength={4}
                   placeholder="Ej. 0134"
-                  value={newBank.code}
+                  value={bankForm.values.code}
                   onChange={(e) => {
                     const val = e.target.value.replace(/\D/g, "");
-                    setNewBank({ ...newBank, code: val });
-                    if (bankErrors.code) {
-                      setBankErrors((prev) => ({ ...prev, code: "" }));
+                    bankForm.setValues({ ...bankForm.values, code: val });
+                    if (bankForm.errors.code) {
+                      bankForm.setErrors((prev) => ({ ...prev, code: [] }));
                     }
                   }}
-                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                    bankErrors.code
-                      ? "border-rose-500 focus:ring-rose-500/30"
-                      : "border-neutral-200 dark:border-neutral-700"
-                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${bankForm.errors.code
+                    ? "border-rose-500 focus:ring-rose-500/30"
+                    : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
-                {bankErrors.code && (
-                  <p className="text-rose-600 text-xs mt-1">{bankErrors.code}</p>
+                {bankForm.errors.code && (
+                  <p className="text-rose-600 text-xs mt-1">{bankForm.errors.code[0]}</p>
                 )}
               </div>
 
@@ -1102,21 +1199,20 @@ export function AccountsTable({
                 <input
                   type="text"
                   placeholder="Ej. Banesco Banco Universal"
-                  value={newBank.name}
+                  value={bankForm.values.name}
                   onChange={(e) => {
-                    setNewBank({ ...newBank, name: e.target.value });
-                    if (bankErrors.name) {
-                      setBankErrors((prev) => ({ ...prev, name: "" }));
+                    bankForm.setValues({ ...bankForm.values, name: e.target.value });
+                    if (bankForm.errors.name) {
+                      bankForm.setErrors((prev) => ({ ...prev, name: [] }));
                     }
                   }}
-                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${
-                    bankErrors.name
-                      ? "border-rose-500 focus:ring-rose-500/30"
-                      : "border-neutral-200 dark:border-neutral-700"
-                  } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
+                  className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${bankForm.errors.name
+                    ? "border-rose-500 focus:ring-rose-500/30"
+                    : "border-neutral-200 dark:border-neutral-700"
+                    } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
                 />
-                {bankErrors.name && (
-                  <p className="text-rose-600 text-xs mt-1">{bankErrors.name}</p>
+                {bankForm.errors.name && (
+                  <p className="text-rose-600 text-xs mt-1">{bankForm.errors.name[0]}</p>
                 )}
               </div>
 
@@ -1124,9 +1220,9 @@ export function AccountsTable({
                 <input
                   type="checkbox"
                   id="is_cash"
-                  checked={newBank.is_cash}
+                  checked={bankForm.values.is_cash}
                   onChange={(e) =>
-                    setNewBank({ ...newBank, is_cash: e.target.checked })
+                    bankForm.setValues({ ...bankForm.values, is_cash: e.target.checked })
                   }
                   className="rounded border-neutral-300 text-locatel-medio focus:ring-locatel-medio"
                 />
@@ -1143,9 +1239,9 @@ export function AccountsTable({
                   type="button"
                   onClick={() => {
                     setIsBankModalOpen(false);
-                    setBankErrors({});
+                    bankForm.reset();
                   }}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 cursor-pointer dark:hover:text-black"
                 >
                   Cancelar
                 </button>

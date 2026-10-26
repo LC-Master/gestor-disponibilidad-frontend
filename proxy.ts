@@ -7,7 +7,18 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (pathname.startsWith("/api/")) {
-    return NextResponse.next();
+    const requestHeaders = new Headers(request.headers);
+    const token =
+      request.cookies.get("access_token")?.value ||
+      request.cookies.get("token")?.value;
+    if (token && !requestHeaders.has("authorization")) {
+      requestHeaders.set("authorization", `Bearer ${token}`);
+    }
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
   }
 
   const accessToken = request.cookies.get("access_token")?.value;
@@ -17,7 +28,7 @@ export function proxy(request: NextRequest) {
   const isAuthenticated = Boolean(accessToken || refreshToken);
 
   if (isAuthPage && isAuthenticated) {
-    return NextResponse.redirect(new URL("/tesoreria", request.url));
+    return NextResponse.redirect(new URL("/perfil", request.url));
   }
 
   if (isAuthPage) {

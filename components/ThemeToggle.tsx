@@ -69,9 +69,9 @@ export function ThemeToggle({ className, showLabel = false }: ThemeToggleProps) 
             aria-label="Toggle theme"
         >
             {isDark ? (
-                <Sun className="w-4 h-4 text-amber-400" />
+                <Sun className="w-4.5 h-4.5 text-amber-400 shrink-0" />
             ) : (
-                <Moon className="w-4 h-4 text-neutral-600 dark:text-neutral-400" />
+                <Moon className="w-4.5 h-4.5 text-neutral-600 dark:text-neutral-400 shrink-0" />
             )}
             {showLabel && <span>{isDark ? "Modo Claro" : "Modo Oscuro"}</span>}
         </button>
