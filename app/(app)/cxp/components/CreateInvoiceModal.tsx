@@ -91,6 +91,8 @@ export function CreateInvoiceModal({
   const [earlyPaymentPctStr, setEarlyPaymentPctStr] = useState("");
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  // Tracks whether the file analysis succeeded and returned a drive file ID
+  const [analysisSucceeded, setAnalysisSucceeded] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDuplicateError, setIsDuplicateError] = useState(false);
@@ -239,6 +241,9 @@ export function CreateInvoiceModal({
 
       if (data.drive_file_id) {
         setDriveFileId(data.drive_file_id);
+        setAnalysisSucceeded(true);
+      } else {
+        setAnalysisSucceeded(false);
       }
 
       const cleanRif = (r?: string) => (r ? r.toUpperCase().replace(/[^A-Z0-9]/g, "") : "");
@@ -599,7 +604,7 @@ export function CreateInvoiceModal({
     setIsSubmitting(true);
     try {
       let finalDriveFileId = driveFileId;
-      if (attachedFile && !finalDriveFileId) {
+      if (attachedFile && !finalDriveFileId && analysisSucceeded) {
         const fd = new FormData();
         fd.append("file", attachedFile);
         const upRes = await fetchClient("/api/v1/cxp/invoices/attachment", {
