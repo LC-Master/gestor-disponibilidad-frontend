@@ -8,10 +8,7 @@ export function useTheme() {
 
     useEffect(() => {
         const isDark =
-            document.documentElement.classList.contains("dark") ||
-            localStorage.getItem("theme") === "dark" ||
-            (!localStorage.getItem("theme") &&
-                window.matchMedia("(prefers-color-scheme: dark)").matches);
+            localStorage.getItem("theme") === "dark";
 
         if (isDark) {
             document.documentElement.classList.add("dark");

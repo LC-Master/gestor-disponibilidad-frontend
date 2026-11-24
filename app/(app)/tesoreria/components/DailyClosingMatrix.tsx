@@ -13,10 +13,13 @@ import {
   ShieldCheck,
   Search,
   Filter,
-  ChevronDown
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { BankAccount, Company, DailyAvailability, UserProfile } from "../types";
 import { getSpecificRate } from "@/lib/exchangeRates";
 
@@ -66,7 +69,7 @@ export function DailyClosingMatrix({
   const [loadingExisting, setLoadingExisting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [exchangeRateStr, setExchangeRateStr] = useState<string>("36.5");
+  const [exchangeRateStr, setExchangeRateStr] = useState<string>("0");
   const [euroRateStr, setEuroRateStr] = useState<string>("0");
   const [supplierAmountStr, setSupplierAmountStr] = useState<string>("0");
   const [payrollAmountStr, setPayrollAmountStr] = useState<string>("0");
@@ -85,6 +88,10 @@ export function DailyClosingMatrix({
   const isPositionClosed = availabilityStatus === "APROBADO";
   const [historyAvailabilities, setHistoryAvailabilities] = useState<DailyAvailability[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const [historyTotalRecords, setHistoryTotalRecords] = useState<number>(0);
+  const [historyTotalPages, setHistoryTotalPages] = useState<number>(1);
+  const historyPageSize = 15;
   const historyRef = useRef<HTMLDivElement>(null);
 
   const [quotaError, setQuotaError] = useState<{
@@ -99,14 +106,29 @@ export function DailyClosingMatrix({
     activeCount: number;
   } | null>(null);
 
-  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState<string>(initialCompanyId || "ALL");
+  const [selectedCompanyFilter, setSelectedCompanyFilter] = useState<string>(
+    initialCompanyId && initialCompanyId !== "ALL" ? initialCompanyId : companies[0]?.id || ""
+  );
   const [selectedBankFilter, setSelectedBankFilter] = useState<string>("ALL");
   const [selectedCurrencyFilter, setSelectedCurrencyFilter] = useState<string>("ALL");
   const [searchAccount, setSearchAccount] = useState<string>("");
 
+  useEffect(() => {
+    if (initialCompanyId && initialCompanyId !== "ALL") {
+      setSelectedCompanyFilter(initialCompanyId);
+    } else if ((!selectedCompanyFilter || selectedCompanyFilter === "ALL") && companies.length > 0) {
+      setSelectedCompanyFilter(companies[0].id);
+    }
+  }, [initialCompanyId, companies, selectedCompanyFilter]);
+
   const activeAccounts = useMemo(() => {
     return accounts.filter((acc) => acc.is_active);
   }, [accounts]);
+
+  const companyAccounts = useMemo(() => {
+    if (!selectedCompanyFilter) return [];
+    return activeAccounts.filter((acc) => acc.company_id === selectedCompanyFilter);
+  }, [activeAccounts, selectedCompanyFilter]);
 
   const companyMap = useMemo(() => {
     const map = new Map<string, Company>();
@@ -116,11 +138,11 @@ export function DailyClosingMatrix({
 
   const availableBanks = useMemo(() => {
     const set = new Set<string>();
-    activeAccounts.forEach((acc) => {
+    companyAccounts.forEach((acc) => {
       if (acc.bank?.name) set.add(acc.bank.name);
     });
     return Array.from(set).sort();
-  }, [activeAccounts]);
+  }, [companyAccounts]);
 
   const companyAccountCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -131,10 +153,7 @@ export function DailyClosingMatrix({
   }, [activeAccounts]);
 
   const filteredAccounts = useMemo(() => {
-    return activeAccounts.filter((acc) => {
-      if (selectedCompanyFilter !== "ALL" && acc.company_id !== selectedCompanyFilter) {
-        return false;
-      }
+    return companyAccounts.filter((acc) => {
       if (selectedBankFilter !== "ALL" && acc.bank?.name !== selectedBankFilter) {
         return false;
       }
@@ -161,50 +180,61 @@ export function DailyClosingMatrix({
       }
       return true;
     });
-  }, [activeAccounts, selectedCompanyFilter, selectedBankFilter, selectedCurrencyFilter, searchAccount, companyMap]);
+  }, [companyAccounts, selectedBankFilter, selectedCurrencyFilter, searchAccount, companyMap]);
 
   const visibleLoadedCount = useMemo(() => {
     return filteredAccounts.filter((acc) => loadedAccountIds.has(acc.id)).length;
   }, [filteredAccounts, loadedAccountIds]);
 
-  const loadBalancesAndAvailability = async (date: string) => {
+  const loadBalancesAndAvailability = async (date: string, companyId: string) => {
+    if (!companyId || companyId === "ALL") return;
     setLoadingExisting(true);
     setQuotaError(null);
     setRateError(null);
     try {
-      const posPromises = companies.map((c) =>
-        fetchClient(`/api/v1/treasury/companies/${c.id}/position?date=${date}`)
-          .then((r) => (r.ok ? r.json() : []))
-          .catch(() => [])
-      );
+      const posRes = await fetchClient(`/api/v1/treasury/companies/${companyId}/position?date=${date}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []);
 
-      const posResults = await Promise.all(posPromises);
-      const allBalances = posResults.flat();
+      const allBalances = Array.isArray(posRes) ? posRes : [];
 
       const loadedSet = new Set<string>();
       const inputs: Record<string, string> = {};
 
-      accounts.forEach((acc) => {
-        const found = allBalances.find(
-          (b: { bank_account_id: string }) => b.bank_account_id === acc.id
-        );
-        if (found) {
-          loadedSet.add(acc.id);
-          inputs[acc.id] = String(found.balance_amount);
-        } else {
-          inputs[acc.id] = String(acc.current_balance);
-        }
-      });
+      accounts
+        .filter((acc) => acc.company_id === companyId)
+        .forEach((acc) => {
+          const found = allBalances.find(
+            (b: { bank_account_id: string }) => b.bank_account_id === acc.id
+          );
+          if (found) {
+            loadedSet.add(acc.id);
+            inputs[acc.id] = String(found.balance_amount);
+          } else {
+            inputs[acc.id] = String(acc.current_balance);
+          }
+        });
 
       setLoadedAccountIds(loadedSet);
       setBalanceInputs(inputs);
 
-      const availRes = await fetchClient(`/api/v1/treasury/availabilities?date=${date}`);
+      const availRes = await fetchClient(
+        `/api/v1/treasury/availabilities?company_id=${companyId}&date=${date}`
+      );
       if (availRes.ok) {
         const raw = await availRes.json();
         const availData: DailyAvailability | null = Array.isArray(raw) ? raw[0] || null : raw;
-        if (availData && availData.id) {
-          setExchangeRateStr(String(availData.exchange_rate || 36.5));
+        if (availData && availData.id && availData.company_id === companyId) {
+          if (availData.exchange_rate && availData.exchange_rate > 0) {
+            setExchangeRateStr(String(availData.exchange_rate));
+          }
+          try {
+            const euroRes = await getSpecificRate("Euro", date);
+            if (euroRes && euroRes.Valor > 0) {
+              setEuroRateStr(String(euroRes.Valor));
+            }
+          } catch {
+          }
           setSupplierAmountStr(String(availData.supplier_amount || 0));
           setPayrollAmountStr(String(availData.payroll_amount || 0));
           setTaxAmountStr(String(availData.tax_amount || 0));
@@ -248,41 +278,54 @@ export function DailyClosingMatrix({
           }
         } catch {
         }
+        setSupplierAmountStr("0");
+        setPayrollAmountStr("0");
+        setTaxAmountStr("0");
+        setFxAmountStr("0");
+        setRefundAmountStr("0");
         setAvailabilityStatus("PENDIENTE");
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
     } finally {
       setLoadingExisting(false);
     }
   };
 
   useEffect(() => {
-    if (!selectedDate) return;
-    loadBalancesAndAvailability(selectedDate);
-  }, [selectedDate, companies]);
+    if (!selectedDate || !selectedCompanyFilter || selectedCompanyFilter === "ALL") return;
+    loadBalancesAndAvailability(selectedDate, selectedCompanyFilter);
+  }, [selectedDate, selectedCompanyFilter, companies]);
 
   useEffect(() => {
+    setHistoryPage(1);
+  }, [selectedCompanyFilter]);
+
+  useEffect(() => {
+    if (!selectedCompanyFilter || selectedCompanyFilter === "ALL") {
+      setHistoryAvailabilities([]);
+      setHistoryTotalRecords(0);
+      setHistoryTotalPages(1);
+      return;
+    }
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
     const end = todayStr;
 
-    fetchClient(`/api/v1/treasury/availabilities/history?start=${start}&end=${end}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => {
-        if (Array.isArray(data)) {
-          const uniqueByDate = new Map<string, DailyAvailability>();
-          data.forEach((item: DailyAvailability) => {
-            const d = item.availability_date.split("T")[0];
-            if (!uniqueByDate.has(d)) {
-              uniqueByDate.set(d, item);
-            }
-          });
-          setHistoryAvailabilities(Array.from(uniqueByDate.values()));
-        }
+    fetchClient(`/api/v1/treasury/companies/${selectedCompanyFilter}/availabilities/history?start=${start}&end=${end}&page=${historyPage}&page_size=${historyPageSize}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((resData) => {
+        if (!resData) return;
+        const items: DailyAvailability[] = Array.isArray(resData)
+          ? resData
+          : Array.isArray(resData?.data)
+            ? resData.data
+            : [];
+        setHistoryAvailabilities(items);
+        setHistoryTotalRecords(resData?.meta?.total_records ?? items.length);
+        setHistoryTotalPages(Math.max(1, resData?.meta?.total_pages ?? 1));
       })
       .catch(() => { });
-  }, [todayStr]);
+  }, [todayStr, selectedCompanyFilter, historyPage]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -310,7 +353,7 @@ export function DailyClosingMatrix({
       EUR: { current: 0, next: 0 },
     };
 
-    activeAccounts.forEach((acc) => {
+    companyAccounts.forEach((acc) => {
       const curr = acc.currency || "VES";
       if (!totals[curr]) {
         totals[curr] = { current: 0, next: 0 };
@@ -321,7 +364,7 @@ export function DailyClosingMatrix({
     });
 
     return totals;
-  }, [activeAccounts, balanceInputs]);
+  }, [companyAccounts, balanceInputs]);
 
   const formatVES = (val: number) => {
     return new Intl.NumberFormat("es-VE", {
@@ -339,7 +382,7 @@ export function DailyClosingMatrix({
 
   const totalLiquidityVES = useMemo(() => {
     let sumVES = 0;
-    activeAccounts.forEach((acc) => {
+    companyAccounts.forEach((acc) => {
       const inputStr = balanceInputs[acc.id];
       const val = inputStr !== undefined ? parseFloat(inputStr.replace(",", ".")) || 0 : acc.current_balance;
       if (acc.currency === "VES") {
@@ -347,12 +390,11 @@ export function DailyClosingMatrix({
       } else if (acc.currency === "USD") {
         sumVES += val * (exchangeRate || 1);
       } else if (acc.currency === "EUR") {
-        const rate = euroRate > 0 ? euroRate : (exchangeRate || 1) * 1.08;
-        sumVES += val * rate;
+        sumVES += val * (euroRate || 0);
       }
     });
     return Math.round(sumVES * 100) / 100;
-  }, [activeAccounts, balanceInputs, exchangeRate, euroRate]);
+  }, [companyAccounts, balanceInputs, exchangeRate, euroRate]);
 
   const totalLiquidityUSD = useMemo(() => {
     if (!exchangeRate || exchangeRate <= 0) return 0;
@@ -411,10 +453,10 @@ export function DailyClosingMatrix({
 
       toast.success(`Saldo registrado para ${targetAccount.account_alias || targetAccount.bank?.name || "cuenta"}`);
       setLoadedAccountIds((prev) => new Set([...prev, accountId]));
-      await loadBalancesAndAvailability(selectedDate);
+      await loadBalancesAndAvailability(selectedDate, selectedCompanyFilter);
       onSaved();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al registrar saldo");
+      toast.error(sanitizeErrorMessage(err, "Error al registrar saldo"));
     } finally {
       setSavingAccountId(null);
     }
@@ -423,6 +465,10 @@ export function DailyClosingMatrix({
   const handleApproveAndSaveAvailability = async () => {
     if (!selectedDate) {
       toast.error("Seleccione una fecha de cierre válida");
+      return;
+    }
+    if (!selectedCompanyFilter || selectedCompanyFilter === "ALL") {
+      toast.error("Seleccione una empresa válida");
       return;
     }
     if (isOverLimit) {
@@ -434,7 +480,7 @@ export function DailyClosingMatrix({
     setRateError(null);
     setIsSubmitting(true);
     try {
-      const items = activeAccounts.map((acc) => {
+      const items = companyAccounts.map((acc) => {
         const rawVal = balanceInputs[acc.id];
         const val = rawVal !== undefined ? parseFloat(rawVal.replace(",", ".")) || 0 : acc.current_balance;
         return {
@@ -458,6 +504,7 @@ export function DailyClosingMatrix({
       }
 
       const availPayload = {
+        company_id: selectedCompanyFilter,
         availability_date: selectedDate,
         exchange_rate: exchangeRate,
         total_liquidity: totalLiquidityVES,
@@ -478,36 +525,36 @@ export function DailyClosingMatrix({
         const errData = await availRes.json().catch(() => ({}));
         if (availRes.status === 422 || errData.code === "INSUFFICIENT_SUPPLIER_QUOTA") {
           setQuotaError({
-            message: errData.message || "El cupo asignado no puede ser inferior a las propuestas activas.",
+            message: sanitizeErrorMessage(errData?.message, "El cupo asignado no puede ser inferior a las propuestas activas."),
             minRequired: errData.min_required_amount || errData.committed_amount || 0,
             committed: errData.committed_amount || 0,
             activeCount: errData.active_proposals_count || 0,
           });
-          toast.error(errData.message || "Cupo insuficiente para cubrir las propuestas activas.");
+          toast.error(sanitizeErrorMessage(errData?.message, "Cupo insuficiente para cubrir las propuestas activas."));
           return;
         }
         if (availRes.status === 409 || errData.code === "EXCHANGE_RATE_FROZEN") {
           setRateError({
-            message: errData.message || "La tasa de cambio no puede modificarse mientras existan propuestas de pago abiertas.",
+            message: sanitizeErrorMessage(errData?.message, "La tasa de cambio no puede modificarse mientras existan propuestas de pago abiertas."),
             currentRate: errData.current_exchange_rate || 0,
             activeCount: errData.active_proposals_count || 0,
           });
-          toast.error(errData.message || "La tasa de cambio no puede modificarse mientras existan propuestas abiertas.");
+          toast.error(sanitizeErrorMessage(errData?.message, "La tasa de cambio no puede modificarse mientras existan propuestas abiertas."));
           return;
         }
         if (availRes.status === 403) {
-          toast.error(errData.message || "Acceso denegado: solo coordinadores pueden modificar esta posición.");
+          toast.error(sanitizeErrorMessage(errData?.message, "Acceso denegado: solo coordinadores pueden modificar esta posición."));
           return;
         }
         throw new Error(errData.message || "Error al aprobar disponibilidad");
       }
 
-      toast.success("Posición y disponibilidad diaria aprobadas exitosamente para todas las empresas");
+      toast.success("Posición y disponibilidad diaria aprobadas exitosamente para la empresa seleccionada");
       setAvailabilityStatus("APROBADO");
-      await loadBalancesAndAvailability(selectedDate);
+      await loadBalancesAndAvailability(selectedDate, selectedCompanyFilter);
       onSaved();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al procesar aprobación");
+      toast.error(sanitizeErrorMessage(err, "Error al procesar aprobación"));
     } finally {
       setIsSubmitting(false);
     }
@@ -535,44 +582,72 @@ export function DailyClosingMatrix({
               title="Historial de cierres guardados este mes"
             >
               <History className="w-3.5 h-3.5 text-neutral-400" />
-              <span>{historyAvailabilities.length} cierres</span>
+              <span>{historyTotalRecords} cierres</span>
               <ChevronDown className="w-3 h-3 text-neutral-400" />
             </button>
 
             {isHistoryOpen && (
-              <div className="absolute top-full left-0 mt-1.5 z-40 w-64 bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-lg p-1.5 max-h-56 overflow-y-auto">
-                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 border-b border-neutral-100 dark:border-neutral-800 mb-1">
-                  Posiciones de este mes
+              <div className="absolute top-full left-0 mt-1.5 z-40 w-72 bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-lg p-1.5">
+                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 border-b border-neutral-100 dark:border-neutral-800 mb-1 flex items-center justify-between">
+                  <span>Posiciones registradas</span>
+                  <span className="font-mono">{historyTotalRecords} total</span>
                 </div>
                 {historyAvailabilities.length === 0 ? (
                   <p className="text-xs text-neutral-400 p-2.5 text-center">
                     No hay cierres guardados
                   </p>
                 ) : (
-                  historyAvailabilities.map((hist) => {
-                    const dStr = hist.availability_date.split("T")[0];
-                    const isSelected = selectedDate === dStr;
-                    return (
-                      <button
-                        key={hist.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedDate(dStr);
-                          setIsHistoryOpen(false);
-                        }}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-mono flex items-center justify-between hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors cursor-pointer ${isSelected ? "bg-locatel-medio/10 text-locatel-oscuro dark:text-locatel-claro font-semibold" : "text-neutral-700 dark:text-neutral-300"
-                          }`}
-                      >
-                        <span>{dStr}</span>
-                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-sans font-medium ${hist.status === "APROBADO"
-                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
-                          : "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
-                          }`}>
-                          {hist.status}
+                  <>
+                    <div className="max-h-56 overflow-y-auto space-y-0.5">
+                      {historyAvailabilities.map((hist) => {
+                        const dStr = hist.availability_date.split("T")[0];
+                        const isSelected = selectedDate === dStr;
+                        return (
+                          <button
+                            key={hist.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedDate(dStr);
+                              setIsHistoryOpen(false);
+                            }}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-mono flex items-center justify-between hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors cursor-pointer ${isSelected ? "bg-locatel-medio/10 text-locatel-oscuro dark:text-locatel-claro font-semibold" : "text-neutral-700 dark:text-neutral-300"
+                              }`}
+                          >
+                            <span>{dStr}</span>
+                            <span className={`text-[10px] px-1.5 py-0.2 rounded font-sans font-medium ${hist.status === "APROBADO"
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                              : "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
+                              }`}>
+                              {hist.status}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {historyTotalPages > 1 && (
+                      <div className="flex items-center justify-between pt-1.5 mt-1 border-t border-neutral-100 dark:border-neutral-800 px-1 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                          disabled={historyPage <= 1}
+                          className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="font-mono text-neutral-500">
+                          Pág. {historyPage} / {historyTotalPages}
                         </span>
-                      </button>
-                    );
-                  })
+                        <button
+                          type="button"
+                          onClick={() => setHistoryPage((p) => Math.min(historyTotalPages, p + 1))}
+                          disabled={historyPage >= historyTotalPages}
+                          className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -598,7 +673,7 @@ export function DailyClosingMatrix({
           </div>
 
           <div className="text-[11px] font-mono text-neutral-400 tabular-nums px-2 py-1 bg-neutral-50 dark:bg-neutral-900 rounded-lg border border-neutral-200/60 dark:border-neutral-800">
-            {loadedAccountIds.size}/{activeAccounts.length} conc.
+            {loadedAccountIds.size}/{companyAccounts.length} conc.
           </div>
         </div>
       </div>
@@ -610,7 +685,7 @@ export function DailyClosingMatrix({
           const diffFormatted = formatVES(Math.abs(diff));
           const totalFormatted = formatVES(values.next);
           const totalInUSD = exchangeRate > 0 ? (curr === "VES" ? values.next / exchangeRate : values.next) : 0;
-          const eurRateToUse = euroRate > 0 ? euroRate : (exchangeRate > 0 ? exchangeRate * 1.08 : 0);
+          const eurRateToUse = euroRate > 0 ? euroRate : 0;
 
           return (
             <div key={curr} className="px-3.5 py-1.5 first:pl-1 last:pr-1 flex flex-col justify-between">
@@ -649,37 +724,39 @@ export function DailyClosingMatrix({
       <div className="bg-white dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 rounded-xl p-3 shadow-xs space-y-2.5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
           <div className="flex flex-wrap items-center gap-2 flex-1">
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 rounded-lg border border-neutral-200/80 dark:border-neutral-800 text-xs min-w-44">
-              <Building2 className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
-              <select
-                value={selectedCompanyFilter}
-                onChange={(e) => setSelectedCompanyFilter(e.target.value)}
-                className="bg-transparent border-none text-xs font-medium text-neutral-800 dark:text-neutral-200 focus:outline-none cursor-pointer w-full pr-1"
-              >
-                <option value="ALL">Todas las Empresas ({activeAccounts.length})</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.code ? `${c.code} · ` : ""}{c.name} ({companyAccountCounts[c.id] || 0})
-                  </option>
-                ))}
-              </select>
-            </div>
+            <SearchableSelect
+              value={selectedCompanyFilter}
+              onChange={(val) => setSelectedCompanyFilter(val)}
+              icon={<Building2 className="w-3.5 h-3.5 text-neutral-400 shrink-0" />}
+              placeholder="Seleccionar empresa..."
+              searchPlaceholder="Buscar por código, nombre o RIF..."
+              className="min-w-56"
+              buttonClassName="px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 rounded-lg border border-neutral-200/80 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200"
+              options={companies.map((c) => ({
+                value: c.id,
+                label: `${c.code ? `${c.code} · ` : ""}${c.name} (${companyAccountCounts[c.id] || 0})`,
+                sublabel: c.rif,
+                searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+              }))}
+            />
 
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 rounded-lg border border-neutral-200/80 dark:border-neutral-800 text-xs min-w-40">
-              <Filter className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
-              <select
-                value={selectedBankFilter}
-                onChange={(e) => setSelectedBankFilter(e.target.value)}
-                className="bg-transparent border-none text-xs font-medium text-neutral-800 dark:text-neutral-200 focus:outline-none cursor-pointer w-full pr-1"
-              >
-                <option value="ALL">Todos los Bancos ({availableBanks.length})</option>
-                {availableBanks.map((bank) => (
-                  <option key={bank} value={bank}>
-                    {bank}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <SearchableSelect
+              value={selectedBankFilter}
+              onChange={(val) => setSelectedBankFilter(val)}
+              icon={<Filter className="w-3.5 h-3.5 text-neutral-400 shrink-0" />}
+              placeholder="Todos los Bancos"
+              searchPlaceholder="Buscar banco..."
+              className="min-w-48"
+              buttonClassName="px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 rounded-lg border border-neutral-200/80 dark:border-neutral-800 text-xs text-neutral-800 dark:text-neutral-200"
+              options={[
+                { value: "ALL", label: `Todos los Bancos (${availableBanks.length})` },
+                ...availableBanks.map((bank) => ({
+                  value: bank,
+                  label: bank,
+                  searchTerms: bank,
+                })),
+              ]}
+            />
 
             <div className="inline-flex rounded-lg border border-neutral-200/80 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 p-0.5 text-xs">
               {(["ALL", "VES", "USD", "EUR"] as const).map((curr) => {
@@ -942,7 +1019,6 @@ export function DailyClosingMatrix({
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-neutral-100 dark:border-neutral-900">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-locatel-medio" />
                 <h3 className="text-xs font-semibold text-neutral-900 dark:text-neutral-100 uppercase tracking-wider">
                   Distribución de Liquidez y Posición
                 </h3>
@@ -982,7 +1058,7 @@ export function DailyClosingMatrix({
                 <span className="font-bold text-neutral-900 dark:text-neutral-100">
                   Bs. {formatVES(totalLiquidityVES)}
                 </span>
-                <span className="text-[11px] text-neutral-400">
+                <span className="text-[12px] text-locatel-oscuro font-bold">
                   (${formatUSD(totalLiquidityUSD)})
                 </span>
               </div>
@@ -992,7 +1068,7 @@ export function DailyClosingMatrix({
                 <span className="font-bold text-neutral-900 dark:text-neutral-100">
                   Bs. {formatVES(totalCommittedVES)}
                 </span>
-                <span className="text-[11px] text-neutral-400">
+                <span className="text-[12px] text-locatel-oscuro font-bold">
                   (${formatUSD(totalCommittedUSD)})
                 </span>
               </div>
@@ -1000,13 +1076,13 @@ export function DailyClosingMatrix({
               <div className="flex items-baseline gap-1.5">
                 <span className="text-[11px] font-sans text-neutral-400">Sin Asignar:</span>
                 <span
-                  className={`font-bold ${isOverLimit ? "text-rose-600 dark:text-rose-400" : "text-locatel-oscuro dark:text-locatel-claro"
+                  className={`font-bold underline ${isOverLimit ? "text-rose-600 dark:text-rose-400" : "text-locatel-medio dark:text-locatel-claro"
                     }`}
                 >
                   Bs. {formatVES(remainingAvailableVES)}
                 </span>
                 <span
-                  className={`text-[11px] ${isOverLimit ? "text-rose-400" : "text-neutral-400"
+                  className={`text-[11px] ${isOverLimit ? "text-rose-400" : "text-locatel-medio font-"
                     }`}
                 >
                   (${formatUSD(remainingAvailableUSD)})
@@ -1228,7 +1304,7 @@ export function DailyClosingMatrix({
                 </div>
               ) : (
                 <span className="text-xs text-neutral-500 font-medium">
-                  {loadedAccountIds.size} de {activeAccounts.length} cuentas conciliadas para la fecha seleccionada
+                  {loadedAccountIds.size} de {companyAccounts.length} cuentas conciliadas para la fecha seleccionada
                 </span>
               )}
             </div>

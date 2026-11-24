@@ -11,8 +11,10 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
-import { ProposalDetailsResponse } from "../types";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { getCurrentRates } from "@/lib/exchangeRates";
+import { getProposalInvoiceOriginalDisplay, getProposalInvoiceVESAmount } from "@/lib/invoiceTotals";
+import { CurrentRatesResponse, ProposalDetailsResponse } from "../types";
 
 interface PayProposalDetailModalProps {
   proposalId: string | null;
@@ -30,6 +32,7 @@ export function PayProposalDetailModal({
   canExecutePayment = true,
 }: PayProposalDetailModalProps) {
   const [data, setData] = useState<ProposalDetailsResponse | null>(null);
+  const [rates, setRates] = useState<CurrentRatesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [search, setSearch] = useState("");
@@ -38,6 +41,11 @@ export function PayProposalDetailModal({
   useEffect(() => {
     if (isOpen && proposalId) {
       fetchDetails();
+      getCurrentRates()
+        .then((res) => {
+          if (res) setRates(res);
+        })
+        .catch(() => {});
       setSearch("");
     } else {
       setData(null);
@@ -59,7 +67,7 @@ export function PayProposalDetailModal({
         setSelectedInvoiceIds(new Set(json.invoices.map((inv) => inv.invoice_id)));
       }
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar los datos de la propuesta");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar los datos de la propuesta"));
       onClose();
     } finally {
       setLoading(false);
@@ -121,24 +129,34 @@ export function PayProposalDetailModal({
     }
   };
 
-  const { selectedTotalVES, selectedTotalUSD, selectedCount, unselectedCount } = useMemo(() => {
+  const usdRate = rates?.dolar?.Valor || 0;
+  const eurRate = rates?.euro?.Valor || 0;
+  const isActiveProposal =
+    data?.proposal?.status !== "PAGADA" &&
+    data?.proposal?.status !== "PAGADO" &&
+    data?.proposal?.status !== "ANULADO";
+
+  const { selectedTotalVES, selectedTotalUSD, selectedTotalEUR, selectedCount, unselectedCount } = useMemo(() => {
     let ves = 0;
     let usd = 0;
+    let eur = 0;
     let count = 0;
     for (const inv of invoices) {
       if (selectedInvoiceIds.has(inv.invoice_id)) {
-        ves += inv.amount_ves || 0;
+        ves += getProposalInvoiceVESAmount(inv, usdRate, eurRate, isActiveProposal);
         usd += inv.amount_usd || 0;
+        eur += inv.amount_eur || 0;
         count++;
       }
     }
     return {
       selectedTotalVES: ves,
-      selectedTotalUSD: usd,
+      selectedTotalUSD: isActiveProposal && usdRate > 0 ? ves / usdRate : usd,
+      selectedTotalEUR: isActiveProposal && eurRate > 0 ? ves / eurRate : eur,
       selectedCount: count,
       unselectedCount: invoices.length - count,
     };
-  }, [invoices, selectedInvoiceIds]);
+  }, [invoices, selectedInvoiceIds, usdRate, eurRate, isActiveProposal]);
 
   const handleConfirmPayment = async () => {
     if (!proposalId) return;
@@ -171,7 +189,7 @@ export function PayProposalDetailModal({
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || "Error al ejecutar el pago");
+      toast.error(sanitizeErrorMessage(err, "Error al ejecutar el pago"));
     } finally {
       setIsSubmitting(false);
     }
@@ -277,7 +295,7 @@ export function PayProposalDetailModal({
                     <th className="py-2.5 px-3">Emisión / Vence</th>
                     <th className="py-2.5 px-3 text-right">Monto Original</th>
                     <th className="py-2.5 px-3 text-right">Monto VES</th>
-                    <th className="py-2.5 px-3 text-right">Monto USD</th>
+                    <th className="py-2.5 px-3 text-right">Monto Divisa</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100 dark:divide-neutral-900">
@@ -290,6 +308,9 @@ export function PayProposalDetailModal({
                   ) : (
                     filteredInvoices.map((inv) => {
                       const isChecked = selectedInvoiceIds.has(inv.invoice_id);
+                      const invVES = getProposalInvoiceVESAmount(inv, usdRate, eurRate, isActiveProposal);
+                      const invUSD = isActiveProposal && usdRate > 0 ? invVES / usdRate : inv.amount_usd;
+                      const invEUR = isActiveProposal && eurRate > 0 ? invVES / eurRate : (inv.amount_eur || 0);
                       return (
                         <tr
                           key={inv.invoice_id}
@@ -306,7 +327,14 @@ export function PayProposalDetailModal({
                             />
                           </td>
                           <td className="py-2.5 px-3 whitespace-nowrap font-medium text-neutral-900 dark:text-neutral-100">
-                            <div className="font-mono text-xs font-semibold">{inv.invoice_number}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-xs font-semibold">{inv.invoice_number}</span>
+                              {inv.is_indexed && (
+                                <span className="px-1 py-0.2 rounded text-[9px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/50">
+                                  INDEXADA
+                                </span>
+                              )}
+                            </div>
                             {inv.control_number && (
                               <div className="text-[10px] text-neutral-400 font-mono">
                                 Ctrl: {inv.control_number}
@@ -329,10 +357,19 @@ export function PayProposalDetailModal({
                             {formatMoney(inv.total_amount, inv.currency || "VES")}
                           </td>
                           <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono font-semibold text-neutral-900 dark:text-neutral-100 tabular-nums">
-                            {formatMoney(inv.amount_ves, "VES")}
+                            <div>{formatMoney(invVES, "VES")}</div>
+                            {inv.is_indexed && (
+                              <div className="text-[10px] font-normal text-neutral-400">
+                                Orig: {getProposalInvoiceOriginalDisplay(inv, formatMoney)}
+                              </div>
+                            )}
                           </td>
                           <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400 tabular-nums">
-                            ${formatMoney(inv.amount_usd, "USD")}
+                            {inv.currency === "EUR" ? (
+                              <span>€{formatMoney(invEUR, "EUR")}</span>
+                            ) : (
+                              <span>${formatMoney(invUSD, "USD")}</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -354,10 +391,10 @@ export function PayProposalDetailModal({
                 </div>
                 <div className="border-l border-neutral-200 dark:border-neutral-800 pl-4">
                   <span className="text-[10px] uppercase font-semibold text-neutral-500 tracking-wider block">
-                    Equivalente USD
+                    Equivalente Divisa
                   </span>
                   <span className="text-sm font-semibold font-mono text-neutral-600 dark:text-neutral-400 tabular-nums">
-                    ${formatMoney(selectedTotalUSD, "USD")}
+                    ${formatMoney(selectedTotalUSD, "USD")}{selectedTotalEUR > 0 && ` | €${formatMoney(selectedTotalEUR, "EUR")}`}
                   </span>
                 </div>
                 <div className="border-l border-neutral-200 dark:border-neutral-800 pl-4 text-xs text-neutral-500">

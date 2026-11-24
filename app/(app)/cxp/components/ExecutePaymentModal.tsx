@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, X, TrendingUp, TrendingDown, ArrowRight, DollarSign } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
 import { Invoice, DifferentialResponse } from "../types";
 import { getDifferential } from "@/lib/exchangeRates";
 
@@ -58,8 +58,8 @@ export function ExecutePaymentModal({
             setSelectedAccountId(list[0].id);
           }
         }
-      } catch (err) {
-        console.error(err);
+      } catch {
+        // Silenciar error en carga secundaria de cuentas
       } finally {
         setLoadingAccounts(false);
       }
@@ -125,7 +125,7 @@ export function ExecutePaymentModal({
     ? totalForeignAmount * differential.absolute_difference
     : 0;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (!selectedAccountId) {
@@ -168,7 +168,7 @@ export function ExecutePaymentModal({
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || "Error al ejecutar liquidación de pago");
+      toast.error(sanitizeErrorMessage(err, "Error al ejecutar liquidación de pago"));
     } finally {
       setSubmitting(false);
     }
@@ -260,11 +260,10 @@ export function ExecutePaymentModal({
                     </div>
                     <div>
                       <span className="text-[11px] text-neutral-400">Variación Porcentual:</span>
-                      <p className={`font-mono font-bold flex items-center gap-1 ${
-                        differential.percentage_difference >= 0
+                      <p className={`font-mono font-bold flex items-center gap-1 ${differential.percentage_difference >= 0
                           ? "text-rose-600 dark:text-rose-400"
                           : "text-emerald-600 dark:text-emerald-400"
-                      }`}>
+                        }`}>
                         {differential.percentage_difference >= 0 ? (
                           <TrendingUp className="w-3.5 h-3.5" />
                         ) : (
@@ -285,9 +284,8 @@ export function ExecutePaymentModal({
                         {differentialTotalBs >= 0 ? "Pérdida en cambio (mayor desembolso Bs)" : "Ganancia en cambio"}
                       </p>
                     </div>
-                    <span className={`font-mono font-extrabold text-sm ${
-                      differentialTotalBs >= 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
-                    }`}>
+                    <span className={`font-mono font-extrabold text-sm ${differentialTotalBs >= 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                      }`}>
                       {differentialTotalBs >= 0 ? "+" : ""}
                       Bs. {formatNumber(differentialTotalBs)}
                     </span>

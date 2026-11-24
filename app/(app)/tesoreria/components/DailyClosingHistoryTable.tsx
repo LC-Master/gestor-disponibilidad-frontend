@@ -9,9 +9,12 @@ import {
   Search,
   ExternalLink,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Company, DailyAvailability } from "../types";
 import { fetchClient } from "@/lib/fetchClient";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface DailyClosingHistoryTableProps {
   companies: Company[];
@@ -38,6 +41,10 @@ export function DailyClosingHistoryTable({
   const [startDate, setStartDate] = useState<string>(getDefaultStartDate);
   const [endDate, setEndDate] = useState<string>(getDefaultEndDate);
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(15);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [totalPages, setTotalPages] = useState<number>(1);
 
   const hasActiveFilters = useMemo(() => {
     return (
@@ -53,6 +60,7 @@ export function DailyClosingHistoryTable({
     setSearchTerm("");
     setStartDate(getDefaultStartDate());
     setEndDate(getDefaultEndDate());
+    setPage(1);
   };
 
   const formatVES = (val: number) => {
@@ -72,25 +80,44 @@ export function DailyClosingHistoryTable({
   const loadHistory = async () => {
     setLoading(true);
     try {
+      const params = new URLSearchParams();
+      params.append("start", startDate);
+      params.append("end", endDate);
+      params.append("page", String(page));
+      params.append("page_size", String(pageSize));
+      if (searchTerm.trim()) {
+        params.append("search", searchTerm.trim());
+      }
       const url =
         selectedCompanyId === "all"
-          ? `/api/v1/treasury/availabilities/history?start=${startDate}&end=${endDate}`
-          : `/api/v1/treasury/companies/${selectedCompanyId}/availabilities/history?start=${startDate}&end=${endDate}`;
+          ? `/api/v1/treasury/availabilities/history?${params.toString()}`
+          : `/api/v1/treasury/companies/${selectedCompanyId}/availabilities/history?${params.toString()}`;
       const res = await fetchClient(url);
       if (res.ok) {
-        const data = await res.json();
-        setAvailabilities(Array.isArray(data) ? data : []);
+        const resData = await res.json();
+        if (Array.isArray(resData)) {
+          setAvailabilities(resData);
+          setTotalRecords(resData.length);
+          setTotalPages(Math.max(1, Math.ceil(resData.length / pageSize)));
+        } else {
+          const items = Array.isArray(resData?.data) ? resData.data : [];
+          setAvailabilities(items);
+          setTotalRecords(resData?.meta?.total_records ?? items.length);
+          setTotalPages(Math.max(1, resData?.meta?.total_pages ?? 1));
+        }
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadHistory();
-  }, [selectedCompanyId, startDate, endDate]);
+    const timer = setTimeout(() => {
+      loadHistory();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [selectedCompanyId, startDate, endDate, searchTerm, page, pageSize]);
 
   const companyMap = useMemo(() => {
     const map = new Map<string, Company>();
@@ -98,20 +125,8 @@ export function DailyClosingHistoryTable({
     return map;
   }, [companies]);
 
-  const filteredList = useMemo(() => {
-    return availabilities.filter((item) => {
-      const comp = companyMap.get(item.company_id) || item.company;
-      const compName = comp?.name || "";
-      const dateStr = item.availability_date ? item.availability_date.split("T")[0] : "";
-      const term = searchTerm.toLowerCase().trim();
-      if (!term) return true;
-      return (
-        compName.toLowerCase().includes(term) ||
-        dateStr.includes(term) ||
-        (item.status && item.status.toLowerCase().includes(term))
-      );
-    });
-  }, [availabilities, companyMap, searchTerm]);
+  const filteredList = availabilities;
+  const paginatedList = availabilities;
 
   return (
     <div className="space-y-6">
@@ -122,18 +137,25 @@ export function DailyClosingHistoryTable({
               <Building2 className="w-4 h-4 text-locatel-medio" />
               Empresa
             </label>
-            <select
+            <SearchableSelect
               value={selectedCompanyId}
-              onChange={(e) => setSelectedCompanyId(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
-            >
-              <option value="all">Todas las Empresas</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({c.code})
-                </option>
-              ))}
-            </select>
+              onChange={(val) => {
+                setSelectedCompanyId(val);
+                setPage(1);
+              }}
+              placeholder="Todas las Empresas"
+              searchPlaceholder="Buscar por código, nombre o RIF..."
+              buttonClassName="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200"
+              options={[
+                { value: "all", label: "Todas las Empresas" },
+                ...companies.map((c) => ({
+                  value: c.id,
+                  label: c.code ? `${c.code} · ${c.name}` : c.name,
+                  sublabel: c.rif || undefined,
+                  searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+                })),
+              ]}
+            />
           </div>
 
           <div>
@@ -144,7 +166,10 @@ export function DailyClosingHistoryTable({
             <input
               type="date"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPage(1);
+              }}
               className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
             />
           </div>
@@ -157,7 +182,10 @@ export function DailyClosingHistoryTable({
             <input
               type="date"
               value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(1);
+              }}
               className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
             />
           </div>
@@ -172,13 +200,19 @@ export function DailyClosingHistoryTable({
                 type="text"
                 placeholder="Filtrar por texto..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setPage(1);
+                }}
                 className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 pr-8"
               />
               {searchTerm && (
                 <button
                   type="button"
-                  onClick={() => setSearchTerm("")}
+                  onClick={() => {
+                    setSearchTerm("");
+                    setPage(1);
+                  }}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 cursor-pointer"
                   title="Borrar texto de búsqueda"
                 >
@@ -192,9 +226,9 @@ export function DailyClosingHistoryTable({
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t border-neutral-100 dark:border-neutral-800">
           <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
             <span>
-              {filteredList.length === 1
+              {totalRecords === 1
                 ? "1 cierre registrado"
-                : `${filteredList.length} cierres registrados`}
+                : `${totalRecords.toLocaleString("es-VE")} cierres registrados`}
             </span>
             {hasActiveFilters && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-locatel-medio/10 text-locatel-medio dark:bg-emerald-950/40 dark:text-emerald-400">
@@ -272,7 +306,7 @@ export function DailyClosingHistoryTable({
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200/80 dark:divide-neutral-800 text-xs">
-                {filteredList.map((item) => {
+                {paginatedList.map((item) => {
                   const comp = companyMap.get(item.company_id) || item.company;
                   const dateStr = item.availability_date ? item.availability_date.split("T")[0] : "";
                   const rate = item.exchange_rate || 1;
@@ -352,7 +386,7 @@ export function DailyClosingHistoryTable({
                           title="Cargar y editar este cierre diario"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
-                          <span>Editar Cierre</span>
+                          <span>Editar</span>
                         </button>
                       </td>
                     </tr>
@@ -360,6 +394,47 @@ export function DailyClosingHistoryTable({
                 })}
               </tbody>
             </table>
+            <div className="px-4 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3 text-neutral-500 dark:text-neutral-400">
+                <span>
+                  Total: <strong className="text-neutral-800 dark:text-neutral-200 font-mono">{totalRecords.toLocaleString("es-VE")}</strong> registros
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+                >
+                  <option value={15}>15 / pág</option>
+                  <option value={30}>30 / pág</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1 || loading}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Anterior</span>
+                </button>
+                <span className="font-mono text-neutral-600 dark:text-neutral-300 px-2">
+                  Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || loading}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                >
+                  <span>Siguiente</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -13,7 +13,6 @@ export function BcvRateBadge() {
     setLoading(true);
     try {
       const data = await getCurrentRates();
-      console.log(data)
       if (data && (data.dolar || data.euro)) {
         setRates(data);
       }

@@ -7,6 +7,8 @@ import {
   Ban,
   Check,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Eye,
   RefreshCw,
@@ -16,10 +18,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { getCurrentRates } from "@/lib/exchangeRates";
 import { Company } from "@/app/(app)/tesoreria/types";
-import { PaymentProposal, ProposalStatus } from "../types";
+import { CurrentRatesResponse, PaymentProposal, ProposalStatus } from "../types";
 import { PayProposalDetailModal } from "./PayProposalDetailModal";
+import { ActionMenuPortal } from "@/components/ui/ActionMenuPortal";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface UserProfile {
   id: string;
@@ -39,13 +44,35 @@ interface ScheduledInvoicesTableViewProps {
 export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoicesTableViewProps) {
   const [proposals, setProposals] = useState<PaymentProposal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rates, setRates] = useState<CurrentRatesResponse | null>(null);
   const [payingProposalId, setPayingProposalId] = useState<string | null>(null);
 
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("ALL");
+  useEffect(() => {
+    getCurrentRates()
+      .then((data) => {
+        if (data) setRates(data);
+      })
+      .catch(() => { });
+  }, []);
+
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => companies[0]?.id || "");
   const [selectedStatus, setSelectedStatus] = useState<string>("APROBADO");
   const [search, setSearch] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [totalPages, setTotalPages] = useState<number>(1);
+
+  useEffect(() => {
+    if (
+      companies.length > 0 &&
+      (!selectedCompanyId || selectedCompanyId === "ALL" || !companies.some((c) => c.id === selectedCompanyId))
+    ) {
+      setSelectedCompanyId(companies[0].id);
+    }
+  }, [companies, selectedCompanyId]);
 
   const [detailModalProposalId, setDetailModalProposalId] = useState<string | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -54,6 +81,7 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
   const [proposalToCancel, setProposalToCancel] = useState<PaymentProposal | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [isCancelling, setIsCancelling] = useState(false);
+  const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
 
   const hasPermission = (code: string) => {
     const clean = code.toLowerCase().trim();
@@ -86,12 +114,19 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
     isAdmin;
 
   const fetchProposals = async () => {
+    if (!selectedCompanyId || selectedCompanyId === "ALL") {
+      setProposals([]);
+      setTotalRecords(0);
+      setTotalPages(1);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (selectedCompanyId && selectedCompanyId !== "ALL") {
-        params.append("company_id", selectedCompanyId);
-      }
+      params.append("company_id", selectedCompanyId);
+      params.append("page", String(page));
+      params.append("page_size", String(pageSize));
       if (selectedStatus && selectedStatus !== "TODAS") {
         params.append("status", selectedStatus);
       }
@@ -106,10 +141,19 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
       if (!res.ok) {
         throw new Error("Error al obtener las propuestas de pago");
       }
-      const data = await res.json();
-      setProposals(Array.isArray(data) ? data : []);
+      const resData = await res.json();
+      if (Array.isArray(resData)) {
+        setProposals(resData);
+        setTotalRecords(resData.length);
+        setTotalPages(Math.max(1, Math.ceil(resData.length / pageSize)));
+      } else {
+        const items = Array.isArray(resData?.data) ? resData.data : [];
+        setProposals(items);
+        setTotalRecords(resData?.meta?.total_records ?? items.length);
+        setTotalPages(Math.max(1, resData?.meta?.total_pages ?? 1));
+      }
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar propuestas");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar propuestas"));
     } finally {
       setLoading(false);
     }
@@ -117,7 +161,7 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
 
   useEffect(() => {
     fetchProposals();
-  }, [selectedCompanyId, selectedStatus, startDate, endDate]);
+  }, [selectedCompanyId, selectedStatus, startDate, endDate, page, pageSize]);
 
   const formatMoney = (val: number, cur: string = "VES") => {
     return (
@@ -152,19 +196,27 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
     });
   }, [proposals, search]);
 
-  const { totalCount, totalVES, totalUSD } = useMemo(() => {
+  const usdRate = rates?.dolar?.Valor || 0;
+  const eurRate = rates?.euro?.Valor || 0;
+
+  const { totalCount, totalVES, totalUSD, totalEUR } = useMemo(() => {
     let ves = 0;
     let usd = 0;
+    let eur = 0;
     for (const p of filteredProposals) {
       ves += p.total_amount_ves || 0;
       usd += p.total_amount_usd || 0;
+      eur += p.total_amount_eur || 0;
     }
+    const computedUSD = usdRate > 0 ? ves / usdRate : usd;
+    const computedEUR = eurRate > 0 ? ves / eurRate : eur;
     return {
       totalCount: filteredProposals.length,
       totalVES: ves,
-      totalUSD: usd,
+      totalUSD: computedUSD,
+      totalEUR: computedEUR,
     };
-  }, [filteredProposals]);
+  }, [filteredProposals, usdRate, eurRate]);
 
   const handleConfirmPayModal = async () => {
     if (!proposalToPay) return;
@@ -185,7 +237,7 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
       setProposalToPay(null);
       fetchProposals();
     } catch (err: any) {
-      toast.error(err.message || "Error al pagar la propuesta");
+      toast.error(sanitizeErrorMessage(err, "Error al pagar la propuesta"));
     } finally {
       setPayingProposalId(null);
     }
@@ -211,7 +263,7 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
       setCancelReason("");
       fetchProposals();
     } catch (err: any) {
-      toast.error(err.message || "Error al liberar la propuesta");
+      toast.error(sanitizeErrorMessage(err, "Error al liberar la propuesta"));
     } finally {
       setIsCancelling(false);
     }
@@ -234,7 +286,7 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
         );
       case "APROBADO":
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800/60">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800/60">
             <Clock className="w-3 h-3" />
             POR PAGAR (APROBADA)
           </span>
@@ -290,11 +342,11 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
 
         <div className="bg-white dark:bg-neutral-950 border border-neutral-200/80 dark:border-neutral-800 rounded-xl p-3.5 px-4 shadow-2xs flex flex-col justify-between">
           <span className="text-[10px] font-semibold text-neutral-500 uppercase tracking-wider">
-            Equivalente (USD)
+            Equivalente (USD / EUR)
           </span>
           <div className="flex items-baseline justify-between mt-1.5">
             <span className="text-xl font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums">
-              ${formatMoney(totalUSD, "USD")}
+              ${formatMoney(totalUSD, "USD")}{totalEUR > 0 && ` | €${formatMoney(totalEUR, "EUR")}`}
             </span>
           </div>
         </div>
@@ -330,18 +382,22 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
             <label className="block text-[10px] font-semibold text-neutral-500 uppercase tracking-wider mb-1 truncate">
               Empresa
             </label>
-            <select
+            <SearchableSelect
               value={selectedCompanyId}
-              onChange={(e) => setSelectedCompanyId(e.target.value)}
-              className="w-full min-w-0 px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 rounded-lg text-xs font-medium text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 cursor-pointer truncate"
-            >
-              <option value="ALL">Todas las Empresas</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code ? `${c.code} · ${c.name}` : c.name}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => {
+                setSelectedCompanyId(val);
+                setPage(1);
+              }}
+              placeholder="Seleccionar empresa..."
+              searchPlaceholder="Buscar por código, nombre o RIF..."
+              buttonClassName="w-full min-w-0 px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 rounded-lg text-xs font-medium text-neutral-800 dark:text-neutral-200"
+              options={companies.map((c) => ({
+                value: c.id,
+                label: c.code ? `${c.code} · ${c.name}` : c.name,
+                sublabel: c.rif || undefined,
+                searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+              }))}
+            />
           </div>
 
           <div className="min-w-0">
@@ -350,7 +406,10 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
             </label>
             <select
               value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
+              onChange={(e) => {
+                setSelectedStatus(e.target.value);
+                setPage(1);
+              }}
               className="w-full min-w-0 px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 rounded-lg text-xs font-medium text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 cursor-pointer truncate"
             >
               <option value="APROBADO">Por Pagar (Aprobadas)</option>
@@ -367,7 +426,10 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
             <input
               type="date"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPage(1);
+              }}
               className="w-full min-w-0 px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 rounded-lg text-xs font-mono text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 cursor-pointer"
             />
           </div>
@@ -377,15 +439,15 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
               <label className="block text-[10px] font-semibold text-neutral-500 uppercase tracking-wider truncate">
                 Ejecución Hasta
               </label>
-              {(startDate || endDate || selectedCompanyId !== "ALL" || selectedStatus !== "APROBADO") && (
+              {(startDate || endDate || selectedStatus !== "APROBADO" || search) && (
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedCompanyId("ALL");
                     setSelectedStatus("APROBADO");
                     setStartDate("");
                     setEndDate("");
                     setSearch("");
+                    setPage(1);
                   }}
                   className="text-[10px] font-medium text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200 transition-colors cursor-pointer shrink-0 ml-1"
                 >
@@ -396,16 +458,19 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
             <input
               type="date"
               value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(1);
+              }}
               className="w-full min-w-0 px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 rounded-lg text-xs font-mono text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 cursor-pointer"
             />
           </div>
         </div>
       </div>
 
-      <div className="border border-neutral-200/80 dark:border-neutral-800 rounded-xl overflow-hidden shadow-2xs bg-white dark:bg-neutral-950">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400">
+      <div className="border border-neutral-200/80 dark:border-neutral-800 rounded-xl flex flex-col min-h-[calc(100vh-16rem)] shadow-2xs bg-white dark:bg-neutral-950">
+        <div className="overflow-x-auto flex-1">
+          <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400 min-w-230">
             <thead className="bg-neutral-50/70 dark:bg-neutral-900/40 border-b border-neutral-200 dark:border-neutral-800 text-[11px] font-semibold text-neutral-500 uppercase tracking-wider whitespace-nowrap">
               <tr>
                 <th className="py-3 px-3">Código</th>
@@ -413,9 +478,9 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
                 <th className="py-3 px-3">Fecha Ejecución</th>
                 <th className="py-3 px-3 text-center">Facturas</th>
                 <th className="py-3 px-3 text-right">Monto Total VES</th>
-                <th className="py-3 px-3 text-right">Monto Total USD</th>
+                <th className="py-3 px-3 text-right">Total Divisa</th>
                 <th className="py-3 px-3 text-center">Estatus</th>
-                <th className="py-3 px-3 text-right">Acciones</th>
+                <th className="py-3 px-3 w-12 text-center">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100 dark:divide-neutral-900">
@@ -475,46 +540,55 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
                       </td>
 
                       <td className="py-3 px-3 text-right whitespace-nowrap font-mono text-neutral-500 dark:text-neutral-400 tabular-nums">
-                        ${formatMoney(p.total_amount_usd, "USD")}
+                        <div>
+                          ≈ $
+                          {formatMoney(
+                            usdRate > 0 ? p.total_amount_ves / usdRate : p.total_amount_usd,
+                            "USD"
+                          )}
+                        </div>
+                        {eurRate > 0 ? (
+                          <div className="text-[10px] text-neutral-400">
+                            ≈ €{formatMoney(p.total_amount_ves / eurRate, "EUR")}
+                          </div>
+                        ) : p.total_amount_eur && p.total_amount_eur > 0 ? (
+                          <div className="text-[10px] text-neutral-400">
+                            ≈ €{formatMoney(p.total_amount_eur, "EUR")}
+                          </div>
+                        ) : null}
                       </td>
 
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         {renderStatusBadge(p.status)}
                       </td>
 
-                      <td className="py-3 px-3 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className="py-3 px-3 w-12 text-center whitespace-nowrap">
+                        <ActionMenuPortal
+                          isOpen={activeActionMenuId === p.id}
+                          onToggle={() => setActiveActionMenuId(activeActionMenuId === p.id ? null : p.id)}
+                          onClose={() => setActiveActionMenuId(null)}
+                          className="w-36"
+                        >
                           <button
                             type="button"
-                            onClick={() => handleOpenDetail(p.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-xs font-semibold transition-colors cursor-pointer"
+                            onClick={() => {
+                              handleOpenDetail(p.id);
+                              setActiveActionMenuId(null);
+                            }}
+                            className="w-full px-3 py-1.5 flex items-center gap-2 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer font-medium"
                           >
                             <Eye className="w-3.5 h-3.5 text-neutral-500" />
                             <span>Ver Detalle</span>
                           </button>
-
-                          {!isPaid && canReview && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setCancelReason("");
-                                setProposalToCancel(p);
-                              }}
-                              disabled={payingProposalId === p.id || isCancelling}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                              title="Liberar propuesta e invalidar lote"
-                            >
-                              <Ban className="w-3.5 h-3.5" />
-                              <span>Liberar</span>
-                            </button>
-                          )}
-
                           {!isPaid && canExecutePayment && (
                             <button
                               type="button"
-                              onClick={() => setProposalToPay(p)}
+                              onClick={() => {
+                                setProposalToPay(p);
+                                setActiveActionMenuId(null);
+                              }}
                               disabled={payingProposalId === p.id}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                              className="w-full px-3 py-1.5 flex items-center gap-2 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer font-medium disabled:opacity-50"
                             >
                               {payingProposalId === p.id ? (
                                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -524,7 +598,25 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
                               <span>Pagar</span>
                             </button>
                           )}
-                        </div>
+                          {!isPaid && canReview && (
+                            <>
+                              <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCancelReason("");
+                                  setProposalToCancel(p);
+                                  setActiveActionMenuId(null);
+                                }}
+                                disabled={payingProposalId === p.id || isCancelling}
+                                className="w-full px-3 py-1.5 flex items-center gap-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer font-medium disabled:opacity-50"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                                <span>Liberar</span>
+                              </button>
+                            </>
+                          )}
+                        </ActionMenuPortal>
                       </td>
                     </tr>
                   );
@@ -532,6 +624,48 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
               )}
             </tbody>
           </table>
+        </div>
+        <div className="px-4 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3 text-neutral-500 dark:text-neutral-400">
+            <span>
+              Total: <strong className="text-neutral-800 dark:text-neutral-200 font-mono">{totalRecords.toLocaleString("es-VE")}</strong> registros
+            </span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+            >
+              <option value={25}>25 / pág</option>
+              <option value={50}>50 / pág</option>
+              <option value={100}>100 / pág</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Anterior</span>
+            </button>
+            <span className="font-mono text-neutral-600 dark:text-neutral-300 px-2">
+              Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            >
+              <span>Siguiente</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -602,9 +736,11 @@ export function ScheduledInvoicesTableView({ companies, user }: ScheduledInvoice
                 </span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-neutral-200/50 dark:border-neutral-800/50">
-                <span className="text-neutral-500">Equivalente USD:</span>
-                <span className="font-mono text-neutral-700 dark:text-neutral-300">
-                  ${formatMoney(proposalToPay.total_amount_usd, "USD")}
+                <span className="text-neutral-500">Equivalente USD / EUR:</span>
+                <span className="font-mono text-neutral-700 dark:text-neutral-300 text-right">
+                  ${formatMoney(usdRate > 0 ? proposalToPay.total_amount_ves / usdRate : proposalToPay.total_amount_usd, "USD")}
+                  {(eurRate > 0 || (proposalToPay.total_amount_eur && proposalToPay.total_amount_eur > 0)) &&
+                    ` | €${formatMoney(eurRate > 0 ? proposalToPay.total_amount_ves / eurRate : proposalToPay.total_amount_eur || 0, "EUR")}`}
                 </span>
               </div>
               <div className="flex justify-between items-center pt-1.5">

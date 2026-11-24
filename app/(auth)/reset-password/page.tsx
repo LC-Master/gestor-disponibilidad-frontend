@@ -4,6 +4,8 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Lock, Eye, EyeOff, Loader2, ArrowRight, ArrowLeft, AlertCircle, CheckCircle2, ShieldCheck } from "lucide-react";
+import { sanitizeErrorMessage } from "@/lib/fetchClient";
+import Image from "next/image";
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -17,7 +19,7 @@ function ResetPasswordForm() {
   const [errorMessage, setErrorMessage] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setErrorMessage("");
 
@@ -54,11 +56,10 @@ function ResetPasswordForm() {
       if (!res.ok) {
         const tokenErr = data?.errors?.token;
         const passErr = data?.errors?.password;
-        const msg = (Array.isArray(tokenErr) ? tokenErr[0] : tokenErr) ||
-                    (Array.isArray(passErr) ? passErr[0] : passErr) ||
-                    data?.message ||
-                    "Error al restablecer la contraseña.";
-        setErrorMessage(msg);
+        const rawMsg = (Array.isArray(tokenErr) ? tokenErr[0] : tokenErr) ||
+          (Array.isArray(passErr) ? passErr[0] : passErr) ||
+          data?.message;
+        setErrorMessage(sanitizeErrorMessage(rawMsg, "Error al restablecer la contraseña."));
         return;
       }
 
@@ -237,7 +238,7 @@ export default function ResetPasswordPage() {
     <div className="w-full max-w-md px-4 sm:px-0 py-8">
       <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-8 sm:p-10 shadow-xl shadow-neutral-950/5 dark:shadow-black/40">
         <div className="flex flex-col items-center text-center mb-8">
-          <img src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
+          <Image src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
           <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 mt-2">
             Nueva Contraseña
           </h1>

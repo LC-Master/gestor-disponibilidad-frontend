@@ -1,3 +1,46 @@
+export function isTechnicalError(msg?: string | null): boolean {
+  if (!msg || typeof msg !== "string") return false;
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("sql") ||
+    lower.includes("pq:") ||
+    lower.includes("mssql:") ||
+    lower.includes("postgres") ||
+    lower.includes("panic:") ||
+    lower.includes("runtime error") ||
+    lower.includes("dial tcp") ||
+    lower.includes("connection refused") ||
+    lower.includes("syntax error") ||
+    lower.includes("null pointer") ||
+    lower.includes("segmentation fault") ||
+    lower.includes("goroutine") ||
+    lower.includes("stack trace") ||
+    lower.includes("internal server error") ||
+    lower.includes("database")
+  );
+}
+
+export function sanitizeErrorMessage(
+  err: unknown,
+  fallback = "Ocurrió un error al procesar la solicitud."
+): string {
+  if (!err) return fallback;
+  if (typeof err === "string") {
+    return isTechnicalError(err) ? fallback : err;
+  }
+  if (typeof err === "object") {
+    const anyErr = err as any;
+    if (anyErr.status && anyErr.status >= 500) {
+      return "Ocurrió un error en el servidor. Por favor, intente nuevamente.";
+    }
+    const msg = anyErr.message || anyErr.error || anyErr.detail;
+    if (typeof msg === "string" && msg.trim()) {
+      return isTechnicalError(msg) ? fallback : msg;
+    }
+  }
+  return fallback;
+}
+
 let isRefreshing = false;
 let refreshPromise: Promise<string | null> | null = null;
 let pendingRequestsQueue: Array<{
@@ -173,8 +216,11 @@ export async function fetchClient(
       }
       const clone = response.clone();
       const errData = await clone.json().catch(() => null);
+      const raw = errData?.message || errData?.error;
       const errorMessage =
-        errData?.message || errData?.error || "Credenciales o sesión inválida.";
+        raw && typeof raw === "string" && !isTechnicalError(raw)
+          ? raw
+          : "Credenciales o sesión inválida.";
       const err = new Error(errorMessage) as any;
       err.status = 401;
       err.data = errData;
@@ -214,9 +260,17 @@ export async function fetchClient(
   }
 
   if (!response.ok) {
-    const errorMessage =
-      (parsedJson && (parsedJson.message || parsedJson.error)) ||
-      `Error ${response.status}: ${response.statusText || "Error en la petición"}`;
+    let errorMessage = "";
+    if (response.status >= 500) {
+      errorMessage = "Ocurrió un error en el servidor. Por favor, intente más tarde.";
+    } else {
+      const raw = parsedJson && (parsedJson.message || parsedJson.error);
+      if (raw && typeof raw === "string" && !isTechnicalError(raw)) {
+        errorMessage = raw;
+      } else {
+        errorMessage = `Error ${response.status}: No se pudo completar la operación`;
+      }
+    }
     const error = new Error(errorMessage) as any;
     error.status = response.status;
     error.data = parsedJson;

@@ -7,6 +7,8 @@ import {
   AlertTriangle,
   Building2,
   Calendar,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Eye,
   FileSpreadsheet,
@@ -20,9 +22,13 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { getCurrentRates } from "@/lib/exchangeRates";
+import { getInvoiceVESAmount } from "@/lib/invoiceTotals";
+import { ActionMenuPortal } from "@/components/ui/ActionMenuPortal";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { Company } from "@/app/(app)/tesoreria/types";
-import { CxpAvailability, Invoice, InvoiceStatus, Supplier } from "../types";
+import { CurrentRatesResponse, CxpAvailability, Invoice, InvoiceStatus, Supplier } from "../types";
 import { CreateInvoiceModal } from "./CreateInvoiceModal";
 import { CreateProposalModal } from "./CreateProposalModal";
 import { InvoiceAuditTrailModal } from "./InvoiceAuditTrailModal";
@@ -54,24 +60,33 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
 
   const [search, setSearch] = useState("");
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
+    const paramId = searchParams?.get("company_id");
+    if (paramId && paramId !== "ALL" && companies.some((c) => c.id === paramId)) {
+      return paramId;
+    }
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("cxp_selected_company_id");
-      if (saved && (saved === "ALL" || companies.some((c) => c.id === saved))) {
+      if (saved && saved !== "ALL" && companies.some((c) => c.id === saved)) {
         return saved;
       }
     }
-    return searchParams?.get("company_id") || companies[0]?.id || "ALL";
+    return companies[0]?.id || "";
   });
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>("TODOS");
-  const [selectedStatus, setSelectedStatus] = useState<string>("PENDIENTE");
+  const [selectedStatus, setSelectedStatus] = useState<string>("TODOS");
   const [selectedInvoiceType, setSelectedInvoiceType] = useState<string>("TODOS");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [totalPages, setTotalPages] = useState<number>(1);
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     return searchParams?.get("date") || new Date().toISOString().split("T")[0];
   });
 
   const [cxpAvailability, setCxpAvailability] = useState<CxpAvailability | null>(null);
+  const [rates, setRates] = useState<CurrentRatesResponse | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [proposedIdsCount, setProposedIdsCount] = useState<number>(0);
 
@@ -85,11 +100,13 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
   const [isCreateProposalModalOpen, setIsCreateProposalModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiSelectedInvoices, setAiSelectedInvoices] = useState<Invoice[]>([]);
+  const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
 
   const handleCompanyChange = (companyId: string) => {
     setSelectedCompanyId(companyId);
-    setSelectedStatus("PENDIENTE");
+    setSelectedStatus("TODOS");
     setSelectedInvoiceIds(new Set());
+    setPage(1);
     if (typeof window !== "undefined") {
       localStorage.setItem("cxp_selected_company_id", companyId);
     }
@@ -142,17 +159,40 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
         const data = await res.json();
         setSuppliers(Array.isArray(data) ? data : []);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Silenciar error en carga secundaria de proveedores
     }
   };
 
+  useEffect(() => {
+    if (
+      companies.length > 0 &&
+      (!selectedCompanyId || selectedCompanyId === "ALL" || !companies.some((c) => c.id === selectedCompanyId))
+    ) {
+      const firstId = companies[0].id;
+      setSelectedCompanyId(firstId);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("cxp_selected_company_id", firstId);
+      }
+    }
+  }, [companies, selectedCompanyId]);
+
   const fetchInvoices = async () => {
+    if (!selectedCompanyId || selectedCompanyId === "ALL") {
+      setInvoices([]);
+      setTotalRecords(0);
+      setTotalPages(1);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (selectedCompanyId && selectedCompanyId !== "ALL") {
-        params.append("company_id", selectedCompanyId);
+      params.append("company_id", selectedCompanyId);
+      params.append("page", String(page));
+      params.append("page_size", String(pageSize));
+      if (selectedSupplierId && selectedSupplierId !== "TODOS") {
+        params.append("supplier_id", selectedSupplierId);
       }
       if (selectedStatus && selectedStatus !== "TODOS") {
         params.append("status", selectedStatus);
@@ -174,10 +214,19 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
       if (!res.ok) {
         throw new Error("Error al obtener la lista de facturas");
       }
-      const data = await res.json();
-      setInvoices(Array.isArray(data) ? data : []);
+      const resData = await res.json();
+      if (Array.isArray(resData)) {
+        setInvoices(resData);
+        setTotalRecords(resData.length);
+        setTotalPages(Math.max(1, Math.ceil(resData.length / pageSize)));
+      } else {
+        const items = Array.isArray(resData?.data) ? resData.data : [];
+        setInvoices(items);
+        setTotalRecords(resData?.meta?.total_records ?? items.length);
+        setTotalPages(Math.max(1, resData?.meta?.total_pages ?? 1));
+      }
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar facturas");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar facturas"));
     } finally {
       setLoading(false);
     }
@@ -185,6 +234,11 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
 
   useEffect(() => {
     fetchSuppliers();
+    getCurrentRates()
+      .then((data) => {
+        if (data) setRates(data);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -195,10 +249,13 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
   }, [
     search,
     selectedCompanyId,
+    selectedSupplierId,
     selectedStatus,
     selectedInvoiceType,
     dateFrom,
     dateTo,
+    page,
+    pageSize,
   ]);
 
   useEffect(() => {
@@ -234,18 +291,22 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
       setInvoiceToCancel(null);
       fetchInvoices();
     } catch (err: any) {
-      toast.error(err.message || "Error al procesar anulación");
+      toast.error(sanitizeErrorMessage(err, "Error al procesar anulación"));
     } finally {
       setIsCancelling(false);
     }
   };
 
   const fetchAvailability = async () => {
+    if (!selectedCompanyId || selectedCompanyId === "ALL") {
+      setCxpAvailability(null);
+      setLoadingAvailability(false);
+      return;
+    }
     setLoadingAvailability(true);
     try {
-      const companyParam = selectedCompanyId && selectedCompanyId !== "ALL" ? `&company_id=${selectedCompanyId}` : "";
       const res = await fetchClient(
-        `/api/v1/cxp/availability?date=${selectedDate}${companyParam}`
+        `/api/v1/cxp/availability?date=${selectedDate}&company_id=${selectedCompanyId}`
       );
       if (res.ok) {
         const data: CxpAvailability = await res.json();
@@ -284,14 +345,22 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
   const supplierAmount = Math.max(0, cxpAvailability?.supplier_amount ?? 0);
   const cupoConsumido = Math.max(0, cxpAvailability?.cupo_consumido ?? 0);
   const cupoLibre = Math.max(0, cxpAvailability?.cupo_libre ?? 0);
-  const exchangeRate = cxpAvailability?.exchange_rate || 1;
+  const bcvUsdRate = rates?.dolar?.Valor || 0;
+  const bcvEurRate = rates?.euro?.Valor || 0;
+  const exchangeRate =
+    cxpAvailability?.exchange_rate && cxpAvailability.exchange_rate > 1
+      ? cxpAvailability.exchange_rate
+      : bcvUsdRate > 0
+        ? bcvUsdRate
+        : cxpAvailability?.exchange_rate || 1;
 
   const displayedInvoices = useMemo(() => {
-    if (!selectedSupplierId || selectedSupplierId === "TODOS") {
-      return invoices;
-    }
-    return invoices.filter((inv) => inv.supplier_id === selectedSupplierId);
-  }, [invoices, selectedSupplierId]);
+    return invoices.filter(
+      (inv) =>
+        inv.company_id === selectedCompanyId &&
+        (!selectedSupplierId || selectedSupplierId === "TODOS" || inv.supplier_id === selectedSupplierId)
+    );
+  }, [invoices, selectedCompanyId, selectedSupplierId]);
 
   const canSelectRow = (inv: Invoice) => {
     return inv.status === "PENDIENTE" && canCreateProposal;
@@ -306,28 +375,19 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
   }, [displayedInvoices, selectedInvoiceIds]);
 
   const selectedPendingAmountVES = useMemo(() => {
-    return selectedPending.reduce((sum, inv) => {
-      const remaining = inv.total_amount - (inv.paid_amount || 0);
-      if (inv.is_indexed) {
-        const usdBase = inv.total_amount_usd || (inv.exchange_rate > 0 ? inv.total_amount / inv.exchange_rate : 0);
-        const rate = exchangeRate > 0 ? exchangeRate : (inv.exchange_rate || 1);
-        return sum + (usdBase * rate);
-      }
-      if (inv.currency === "VES") return sum + remaining;
-      const rate = exchangeRate > 0 ? exchangeRate : (inv.exchange_rate || 1);
-      return sum + remaining * rate;
-    }, 0);
-  }, [selectedPending, exchangeRate]);
+    return selectedPending.reduce(
+      (sum, inv) => sum + getInvoiceVESAmount(inv, exchangeRate, bcvEurRate),
+      0
+    );
+  }, [selectedPending, exchangeRate, bcvEurRate]);
 
   const selectedPendingAmountUSD = useMemo(() => {
-    return selectedPending.reduce((sum, inv) => {
-      const remaining = inv.total_amount - (inv.paid_amount || 0);
-      if (inv.is_indexed && inv.total_amount_usd) return sum + inv.total_amount_usd;
-      if (inv.currency === "USD") return sum + remaining;
-      const rate = exchangeRate > 0 ? exchangeRate : (inv.exchange_rate || 1);
-      return sum + (rate > 0 ? remaining / rate : 0);
-    }, 0);
-  }, [selectedPending, exchangeRate]);
+    return exchangeRate > 0 ? selectedPendingAmountVES / exchangeRate : 0;
+  }, [selectedPendingAmountVES, exchangeRate]);
+
+  const selectedPendingAmountEUR = useMemo(() => {
+    return bcvEurRate > 0 ? selectedPendingAmountVES / bcvEurRate : 0;
+  }, [selectedPendingAmountVES, bcvEurRate]);
 
   const isWithinQuota = selectedPendingAmountVES <= cupoLibre && cupoLibre > 0 && hasApprovedToday;
 
@@ -404,7 +464,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (selectedSupplierId !== "TODOS") count++;
-    if (selectedStatus !== "PENDIENTE") count++;
+    if (selectedStatus !== "TODOS") count++;
     if (selectedInvoiceType !== "TODOS") count++;
     if (dateFrom) count++;
     if (dateTo) count++;
@@ -466,22 +526,6 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
       default:
         return <span className="text-xs">{status}</span>;
     }
-  };
-
-  const renderTypeBadge = (inv: Invoice) => {
-    const sType = inv.supplier?.supplier_type || "FIRME";
-    return (
-      <div className="flex items-center gap-1.5 font-mono text-[10px]">
-        <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium">
-          {sType}
-        </span>
-        {inv.purchase_order_number && (
-          <span className="text-neutral-400 truncate max-w-24">
-            #{inv.purchase_order_number}
-          </span>
-        )}
-      </div>
-    );
   };
 
   return (
@@ -577,7 +621,10 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
             ref={searchInputRef}
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             placeholder="Buscar por factura, control o proveedor..."
             className="w-full pl-9 pr-12 h-9 border border-neutral-300 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/80 bg-white dark:bg-neutral-950 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none transition-all shadow-2xs"
           />
@@ -587,21 +634,20 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <div className="flex items-center gap-1.5 px-2.5 h-9 bg-white dark:bg-neutral-950 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs shadow-2xs">
-            <Building2 className="w-3.5 h-3.5 text-locatel-medio shrink-0" />
-            <select
-              value={selectedCompanyId}
-              onChange={(e) => handleCompanyChange(e.target.value)}
-              className="bg-transparent border-none text-xs font-semibold text-neutral-800 dark:text-neutral-200 focus:outline-none cursor-pointer max-w-44 truncate"
-            >
-              <option value="ALL">Todas las empresas</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code ? `${c.code} · ${c.name}` : c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <SearchableSelect
+            value={selectedCompanyId}
+            onChange={handleCompanyChange}
+            icon={<Building2 className="w-3.5 h-3.5 text-locatel-medio shrink-0" />}
+            placeholder="Seleccionar empresa..."
+            searchPlaceholder="Buscar empresa por código, nombre o RIF..."
+            className="w-60"
+            options={companies.map((c) => ({
+              value: c.id,
+              label: c.code ? `${c.code} · ${c.name}` : c.name,
+              sublabel: c.rif,
+              searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+            }))}
+          />
 
           <div className="relative" ref={filterRef}>
             <button
@@ -631,10 +677,11 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                       type="button"
                       onClick={() => {
                         setSelectedSupplierId("TODOS");
-                        setSelectedStatus("PENDIENTE");
+                        setSelectedStatus("TODOS");
                         setSelectedInvoiceType("TODOS");
                         setDateFrom("");
                         setDateTo("");
+                        setPage(1);
                       }}
                       className="text-[11px] text-locatel-medio hover:underline cursor-pointer font-medium"
                     >
@@ -648,18 +695,25 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                     <label className="block text-[11px] font-medium text-neutral-500 mb-1">
                       Proveedor
                     </label>
-                    <select
+                    <SearchableSelect
                       value={selectedSupplierId}
-                      onChange={(e) => setSelectedSupplierId(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer truncate"
-                    >
-                      <option value="TODOS">Todos los Proveedores</option>
-                      {suppliers.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.rif} · {s.business_name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => {
+                        setSelectedSupplierId(val);
+                        setPage(1);
+                      }}
+                      placeholder="Todos los Proveedores"
+                      searchPlaceholder="Buscar por RIF, nombre o código SAP..."
+                      buttonClassName="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200"
+                      options={[
+                        { value: "TODOS", label: "Todos los Proveedores" },
+                        ...suppliers.map((s) => ({
+                          value: s.id,
+                          label: `${s.rif} · ${s.business_name}`,
+                          sublabel: s.sap_vendor_code ? `SAP: ${s.sap_vendor_code}` : undefined,
+                          searchTerms: `${s.rif} ${s.business_name} ${s.sap_vendor_code || ""}`,
+                        })),
+                      ]}
+                    />
                   </div>
 
                   <div>
@@ -668,7 +722,10 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                     </label>
                     <select
                       value={selectedStatus}
-                      onChange={(e) => setSelectedStatus(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedStatus(e.target.value);
+                        setPage(1);
+                      }}
                       className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer"
                     >
                       <option value="TODOS">Todas</option>
@@ -686,7 +743,10 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                     </label>
                     <select
                       value={selectedInvoiceType}
-                      onChange={(e) => setSelectedInvoiceType(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedInvoiceType(e.target.value);
+                        setPage(1);
+                      }}
                       className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer"
                     >
                       <option value="TODOS">Todos los Tipos</option>
@@ -704,7 +764,10 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                       <input
                         type="date"
                         value={dateFrom}
-                        onChange={(e) => setDateFrom(e.target.value)}
+                        onChange={(e) => {
+                          setDateFrom(e.target.value);
+                          setPage(1);
+                        }}
                         className="w-full px-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs font-mono text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio"
                       />
                     </div>
@@ -715,7 +778,10 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                       <input
                         type="date"
                         value={dateTo}
-                        onChange={(e) => setDateTo(e.target.value)}
+                        onChange={(e) => {
+                          setDateTo(e.target.value);
+                          setPage(1);
+                        }}
                         className="w-full px-2 py-1 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs font-mono text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio"
                       />
                     </div>
@@ -769,12 +835,12 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
         </div>
       </div>
 
-      <div className="border border-neutral-200/80 dark:border-neutral-800 rounded-xl overflow-hidden bg-white dark:bg-neutral-950">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400">
+      <div className="border border-neutral-200/80 dark:border-neutral-800 rounded-xl flex flex-col min-h-[calc(100vh-16rem)] bg-white dark:bg-neutral-950">
+        <div className="overflow-x-auto flex-1">
+          <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400 min-w-230">
             <thead className="bg-neutral-50/50 dark:bg-neutral-900/50 border-y border-neutral-200/80 dark:border-neutral-800 text-[11px] font-semibold text-neutral-500 uppercase tracking-wider whitespace-nowrap">
               <tr>
-                <th className="py-2 px-3 w-8 text-center">
+                <th className="py-2.5 px-3 w-8 text-center">
                   <input
                     type="checkbox"
                     checked={
@@ -787,17 +853,14 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                     className="w-3.5 h-3.5 rounded border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:ring-0 cursor-pointer disabled:opacity-30"
                   />
                 </th>
-                <th className="py-2 px-3">Empresa</th>
-                <th className="py-2 px-3">Proveedor</th>
-                <th className="py-2 px-3">N° Factura</th>
-                <th className="py-2 px-3">N° Control</th>
-                <th className="py-2 px-3">Tipo</th>
-                <th className="py-2 px-3">Emisión</th>
-                <th className="py-2 px-3">Recepción</th>
-                <th className="py-2 px-3">Vencimiento</th>
-                <th className="py-2 px-3 text-right">Monto Neto</th>
-                <th className="py-2 px-3 text-center">Estatus</th>
-                <th className="py-2 px-3 text-right">Acciones</th>
+                <th className="py-2.5 px-3">Empresa</th>
+                <th className="py-2.5 px-3">Proveedor</th>
+                <th className="py-2.5 px-3">Documento</th>
+                <th className="py-2.5 px-3">Tipo / O.C.</th>
+                <th className="py-2.5 px-3">Fechas</th>
+                <th className="py-2.5 px-3 text-right">Monto Neto</th>
+                <th className="py-2.5 px-3 text-center">Estatus</th>
+                <th className="py-2.5 px-3 w-12 text-center">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100 dark:divide-neutral-900 whitespace-nowrap">
@@ -805,22 +868,19 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                 Array.from({ length: 8 }).map((_, idx) => (
                   <tr key={`skeleton-${idx}`} className="animate-pulse h-11">
                     <td className="py-2 px-3 text-center"><div className="w-3.5 h-3.5 bg-neutral-200 dark:bg-neutral-800 rounded mx-auto" /></td>
-                    <td className="py-2 px-3"><div className="h-3.5 w-16 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
-                    <td className="py-2 px-3"><div className="h-3.5 w-28 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
-                    <td className="py-2 px-3"><div className="h-3.5 w-20 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
-                    <td className="py-2 px-3"><div className="h-3.5 w-16 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
                     <td className="py-2 px-3"><div className="h-3.5 w-14 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
-                    <td className="py-2 px-3"><div className="h-3.5 w-16 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
-                    <td className="py-2 px-3"><div className="h-3.5 w-16 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
-                    <td className="py-2 px-3"><div className="h-3.5 w-16 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
+                    <td className="py-2 px-3"><div className="h-3.5 w-28 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
+                    <td className="py-2 px-3"><div className="h-4 w-20 bg-neutral-200 dark:bg-neutral-800 rounded mb-1" /><div className="h-2.5 w-14 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
+                    <td className="py-2 px-3"><div className="h-3.5 w-14 bg-neutral-200 dark:bg-neutral-800 rounded mb-1" /><div className="h-2.5 w-12 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
+                    <td className="py-2 px-3"><div className="h-3.5 w-16 bg-neutral-200 dark:bg-neutral-800 rounded mb-1" /><div className="h-2.5 w-16 bg-neutral-200 dark:bg-neutral-800 rounded" /></td>
                     <td className="py-2 px-3 text-right"><div className="h-3.5 w-20 bg-neutral-200 dark:bg-neutral-800 rounded ml-auto" /></td>
                     <td className="py-2 px-3 text-center"><div className="h-3.5 w-16 bg-neutral-200 dark:bg-neutral-800 rounded mx-auto" /></td>
-                    <td className="py-2 px-3 text-right"><div className="h-3.5 w-12 bg-neutral-200 dark:bg-neutral-800 rounded ml-auto" /></td>
+                    <td className="py-2 px-3 text-center"><div className="h-4 w-4 bg-neutral-200 dark:bg-neutral-800 rounded mx-auto" /></td>
                   </tr>
                 ))
               ) : displayedInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-12 text-center text-neutral-400">
+                  <td colSpan={9} className="py-12 text-center text-neutral-400">
                     <div className="flex flex-col items-center justify-center gap-1.5">
                       <FileSpreadsheet className="w-7 h-7 text-neutral-300 dark:text-neutral-700" />
                       <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
@@ -842,7 +902,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                       className={`h-11 hover:bg-neutral-50/70 dark:hover:bg-neutral-800/40 transition-colors ${isSelected ? "bg-neutral-50/90 dark:bg-neutral-900/80" : ""
                         }`}
                     >
-                      <td className="py-2 px-3 text-center">
+                      <td className="py-2 px-3 text-center whitespace-nowrap">
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -852,12 +912,12 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                             }`}
                         />
                       </td>
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-3 whitespace-nowrap">
                         <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-900 text-[10px] font-mono text-neutral-700 dark:text-neutral-300">
                           {inv.company?.alias || getCompanyAlias(inv.company_id)}
                         </span>
                       </td>
-                      <td className="py-2 px-3 max-w-50">
+                      <td className="py-2 px-3 max-w-44 whitespace-nowrap">
                         <span className="text-xs font-medium text-neutral-900 dark:text-neutral-100 truncate block">
                           {inv.supplier?.business_name || "-"}
                         </span>
@@ -865,8 +925,8 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                           {inv.supplier?.rif || "S/R"}
                         </span>
                       </td>
-                      <td className="py-2 px-3 font-mono text-xs font-semibold text-neutral-900 dark:text-neutral-100 tabular-nums">
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                      <td className="py-2 px-3 whitespace-nowrap font-mono tabular-nums">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-neutral-900 dark:text-neutral-100">
                           <span>{inv.invoice_number}</span>
                           {inv.is_indexed && (
                             <span className="px-1 py-0.2 rounded text-[9px] font-mono font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
@@ -874,78 +934,119 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                             </span>
                           )}
                         </div>
+                        <div className="text-[10px] text-neutral-400">
+                          {inv.control_number || "-"}
+                        </div>
                       </td>
-                      <td className="py-2 px-3 font-mono text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
-                        {inv.control_number || "-"}
+                      <td className="py-2 px-3 whitespace-nowrap font-mono">
+                        <div>
+                          <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium text-[10px]">
+                            {inv.supplier?.supplier_type || "FIRME"}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-neutral-400 truncate max-w-28">
+                          {inv.purchase_order_number ? `#${inv.purchase_order_number}` : "-"}
+                        </div>
                       </td>
-                      <td className="py-2 px-3">
-                        {renderTypeBadge(inv)}
-                      </td>
-                      <td className="py-2 px-3 font-mono text-xs text-neutral-600 dark:text-neutral-400 tabular-nums">
-                        {formatDate(inv.issue_date)}
-                      </td>
-                      <td className="py-2 px-3 font-mono text-xs text-neutral-600 dark:text-neutral-400 tabular-nums">
-                        {formatDate(inv.reception_date)}
-                      </td>
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-3 whitespace-nowrap">
                         {overdue ? (
-                          <span className="inline-flex items-center gap-1 font-mono text-xs font-medium text-rose-600 dark:text-rose-400">
+                          <div className="inline-flex items-center gap-1 font-mono text-xs font-medium text-rose-600 dark:text-rose-400">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
                             {formatDate(inv.due_date)}
-                          </span>
-                        ) : (
-                          <span className="font-mono text-xs text-neutral-600 dark:text-neutral-300 tabular-nums">
-                            {formatDate(inv.due_date)}
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2 px-3 text-right">
-                        {inv.is_indexed ? (
-                          <div className="font-mono text-xs font-semibold tracking-tight tabular-nums text-neutral-900 dark:text-neutral-100">
-                            Bs. {formatMoney((inv.total_amount_usd || (inv.exchange_rate > 0 ? inv.total_amount / inv.exchange_rate : 0)) * (exchangeRate > 0 ? exchangeRate : (inv.exchange_rate || 1)), "VES")}
                           </div>
+                        ) : (
+                          <div className="font-mono text-xs text-neutral-700 dark:text-neutral-300 tabular-nums">
+                            {formatDate(inv.due_date)}
+                          </div>
+                        )}
+                        <div className="text-[10px] text-neutral-400 font-mono tabular-nums">
+                          Em: {formatDate(inv.issue_date)}
+                        </div>
+                      </td>
+                      <td className="py-2 px-3 text-right whitespace-nowrap">
+                        {inv.is_indexed ? (
+                          <>
+                            <div className="font-mono text-xs font-semibold tracking-tight tabular-nums text-neutral-900 dark:text-neutral-100">
+                              Bs. {formatMoney(getInvoiceVESAmount(inv, exchangeRate, bcvEurRate), "VES")}
+                            </div>
+                            <div className="text-[10px] text-neutral-400 font-mono tabular-nums">
+                              Orig: {formatMoney(inv.total_amount, inv.currency)}
+                            </div>
+                          </>
                         ) : (
                           <>
                             <div className="font-mono text-xs font-semibold tracking-tight tabular-nums text-neutral-900 dark:text-neutral-100">
                               {formatMoney(inv.total_amount, inv.currency)}
                             </div>
-                            {inv.currency !== "VES" && inv.exchange_rate > 1 && (
+                            {inv.currency !== "VES" && (exchangeRate > 1 || inv.exchange_rate > 1) && (
                               <div className="text-[10px] text-neutral-400 font-mono tabular-nums">
-                                ≈ {formatMoney(inv.total_amount * inv.exchange_rate, "VES")}
+                                ≈ {formatMoney(getInvoiceVESAmount(inv, exchangeRate, bcvEurRate), "VES")}
                               </div>
                             )}
                           </>
                         )}
                       </td>
-                      <td className="py-2 px-3 text-center">
+                      <td className="py-2 px-3 text-center whitespace-nowrap">
                         {renderStatusBadge(inv.status)}
                       </td>
-                      <td className="py-2 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
+                      <td className="py-2 px-3 w-12 text-center whitespace-nowrap">
+                        <ActionMenuPortal
+                          isOpen={activeActionMenuId === inv.id}
+                          onToggle={() => setActiveActionMenuId(activeActionMenuId === inv.id ? null : inv.id)}
+                          onClose={() => setActiveActionMenuId(null)}
+                        >
                           <button
-                            onClick={() => setSelectedInvoiceAudit(inv)}
-                            className="p-1 text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors cursor-pointer"
-                            title="Trazabilidad y auditoría"
+                            type="button"
+                            onClick={() => {
+                              setSelectedInvoiceDetail(inv);
+                              setActiveActionMenuId(null);
+                            }}
+                            className="w-full px-3 py-1.5 flex items-center gap-2 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                           >
-                            <History className="w-3.5 h-3.5" />
+                            <Eye className="w-3.5 h-3.5 text-neutral-400" />
+                            <span>Ver Detalle</span>
                           </button>
                           <button
-                            onClick={() => setSelectedInvoiceDetail(inv)}
-                            className="p-1 text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded transition-colors cursor-pointer"
-                            title="Ver detalle del documento"
+                            type="button"
+                            onClick={() => {
+                              setSelectedInvoiceAudit(inv);
+                              setActiveActionMenuId(null);
+                            }}
+                            className="w-full px-3 py-1.5 flex items-center gap-2 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <History className="w-3.5 h-3.5 text-neutral-400" />
+                            <span>Trazabilidad</span>
                           </button>
-                          {canCancelInvoice && inv.status === "PENDIENTE" && (
+                          {canCreateProposal && inv.status === "PENDIENTE" && (
                             <button
-                              onClick={() => setInvoiceToCancel(inv)}
-                              className="p-1 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
-                              title="Anular factura"
+                              type="button"
+                              onClick={() => {
+                                toggleSelectInvoice(inv.id);
+                                setActiveActionMenuId(null);
+                              }}
+                              className="w-full px-3 py-1.5 flex items-center gap-2 text-locatel-oscuro dark:text-locatel-claro hover:bg-locatel-medio/10 transition-colors cursor-pointer"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Clock className="w-3.5 h-3.5 text-locatel-medio" />
+                              <span>{isSelected ? "Liberar Selección" : "Programar Pago"}</span>
                             </button>
                           )}
-                        </div>
+                          {canCancelInvoice && inv.status === "PENDIENTE" && (
+                            <>
+                              <div className="my-1 border-t border-neutral-100 dark:border-neutral-800" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInvoiceToCancel(inv);
+                                  setActiveActionMenuId(null);
+                                }}
+                                className="w-full px-3 py-1.5 flex items-center gap-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Anular</span>
+                              </button>
+                            </>
+                          )}
+                        </ActionMenuPortal>
                       </td>
                     </tr>
                   );
@@ -955,13 +1056,48 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
           </table>
         </div>
 
-        <div className="py-2 px-3 bg-neutral-50/50 dark:bg-neutral-900/50 border-t border-neutral-200/80 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 flex items-center justify-between">
-          <span>
-            {displayedInvoices.length} {displayedInvoices.length === 1 ? "factura" : "facturas"}
-          </span>
-          {/* <span className="font-mono text-neutral-400 text-[11px] tabular-nums">
-            Tasa ref: Bs. {exchangeRate.toFixed(4)}
-          </span> */}
+        <div className="py-2.5 px-3.5 bg-neutral-50/50 dark:bg-neutral-900/50 border-t border-neutral-200/80 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span>
+              Total: <strong className="font-mono text-neutral-800 dark:text-neutral-200">{totalRecords.toLocaleString("es-VE")}</strong> {totalRecords === 1 ? "registro" : "registros"}
+            </span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+            >
+              <option value={25}>25 / pág.</option>
+              <option value={50}>50 / pág.</option>
+              <option value={100}>100 / pág.</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs">
+              Página <strong className="text-neutral-800 dark:text-neutral-200">{page}</strong> de <strong className="text-neutral-800 dark:text-neutral-200">{Math.max(1, totalPages)}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Anterior</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              <span>Siguiente</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -980,6 +1116,7 @@ export function InvoicesTableViewContent({ companies, user }: InvoicesTableViewP
                 </span>
                 <span className="text-[11px] font-mono text-neutral-400 tabular-nums">
                   ≈ ${formatMoney(selectedPendingAmountUSD, "USD")}
+                  {selectedPendingAmountEUR > 0 && ` | €${formatMoney(selectedPendingAmountEUR, "EUR")}`}
                 </span>
 
                 {!hasApprovedToday ? (

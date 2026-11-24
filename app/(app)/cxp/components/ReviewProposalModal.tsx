@@ -18,9 +18,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { getCurrentRates } from "@/lib/exchangeRates";
+import { getProposalInvoiceOriginalDisplay, getProposalInvoiceVESAmount } from "@/lib/invoiceTotals";
 import { Company } from "@/app/(app)/tesoreria/types";
-import { ProposalDetailsResponse } from "../types";
+import { CurrentRatesResponse, ProposalDetailsResponse } from "../types";
 import { SupplierDetailModal } from "./SupplierDetailModal";
 import { InvoiceDetailModal } from "./InvoiceDetailModal";
 
@@ -42,6 +44,7 @@ export function ReviewProposalModal({
   companies = [],
 }: ReviewProposalModalProps) {
   const [data, setData] = useState<ProposalDetailsResponse | null>(null);
+  const [rates, setRates] = useState<CurrentRatesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
@@ -55,6 +58,11 @@ export function ReviewProposalModal({
   useEffect(() => {
     if (isOpen && proposalId) {
       fetchDetails();
+      getCurrentRates()
+        .then((res) => {
+          if (res) setRates(res);
+        })
+        .catch(() => {});
       setShowRejectInput(false);
       setRejectionReason("");
       setShowCancelModal(false);
@@ -110,7 +118,7 @@ export function ReviewProposalModal({
         } catch { }
       }
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar la propuesta");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar la propuesta"));
       onClose();
     } finally {
       setLoading(false);
@@ -150,6 +158,54 @@ export function ReviewProposalModal({
     );
   }, [data?.invoices, search]);
 
+  const usdRate = rates?.dolar?.Valor || 0;
+  const eurRate = rates?.euro?.Valor || 0;
+
+  const isActiveProposal =
+    data?.proposal?.status !== "PAGADA" &&
+    data?.proposal?.status !== "PAGADO" &&
+    data?.proposal?.status !== "ANULADO";
+
+  const { allTotalVES, allTotalUSD, allTotalEUR } = useMemo(() => {
+    const invList = data?.invoices || [];
+    const ves =
+      invList.length > 0
+        ? invList.reduce(
+            (sum, inv) => sum + getProposalInvoiceVESAmount(inv, usdRate, eurRate, isActiveProposal),
+            0
+          )
+        : data?.proposal?.total_amount_ves || 0;
+    const usd =
+      isActiveProposal && usdRate > 0 ? ves / usdRate : data?.proposal?.total_amount_usd || 0;
+    const eur =
+      isActiveProposal && eurRate > 0 ? ves / eurRate : data?.proposal?.total_amount_eur || 0;
+    return { allTotalVES: ves, allTotalUSD: usd, allTotalEUR: eur };
+  }, [data, usdRate, eurRate, isActiveProposal]);
+
+  const { filteredTotalVES, filteredTotalUSD, filteredTotalEUR } = useMemo(() => {
+    const ves = filteredInvoices.reduce(
+      (sum, inv) => sum + getProposalInvoiceVESAmount(inv, usdRate, eurRate, isActiveProposal),
+      0
+    );
+    const usd =
+      isActiveProposal && usdRate > 0
+        ? ves / usdRate
+        : filteredInvoices.length === (data?.invoices?.length || 0)
+          ? data?.proposal?.total_amount_usd || 0
+          : usdRate > 0
+            ? ves / usdRate
+            : 0;
+    const eur =
+      isActiveProposal && eurRate > 0
+        ? ves / eurRate
+        : filteredInvoices.length === (data?.invoices?.length || 0)
+          ? data?.proposal?.total_amount_eur || 0
+          : eurRate > 0
+            ? ves / eurRate
+            : 0;
+    return { filteredTotalVES: ves, filteredTotalUSD: usd, filteredTotalEUR: eur };
+  }, [filteredInvoices, data, usdRate, eurRate, isActiveProposal]);
+
   if (!isOpen || !proposalId) return null;
 
   const proposal = data?.proposal;
@@ -158,7 +214,7 @@ export function ReviewProposalModal({
   const supplierQuota = availability?.supplier_amount || 0;
   const consumedQuota = data?.consumed_quota || 0;
   const freeQuotaAvailable = hasTreasuryApproved ? Math.max(0, supplierQuota - consumedQuota) : 0;
-  const proposedAmountVES = proposal?.total_amount_ves || 0;
+  const proposedAmountVES = allTotalVES;
   const remnantAfterApproval = freeQuotaAvailable - proposedAmountVES;
   const fitsInQuota = hasTreasuryApproved && proposedAmountVES <= freeQuotaAvailable;
   const excessAmount = proposedAmountVES - freeQuotaAvailable;
@@ -189,7 +245,7 @@ export function ReviewProposalModal({
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || "Error al procesar la aprobación");
+      toast.error(sanitizeErrorMessage(err, "Error al procesar la aprobación"));
     } finally {
       setIsProcessing(false);
     }
@@ -219,7 +275,7 @@ export function ReviewProposalModal({
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || "Error al procesar el rechazo");
+      toast.error(sanitizeErrorMessage(err, "Error al procesar el rechazo"));
     } finally {
       setIsProcessing(false);
     }
@@ -246,7 +302,7 @@ export function ReviewProposalModal({
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || "Error al anular la propuesta");
+      toast.error(sanitizeErrorMessage(err, "Error al anular la propuesta"));
     } finally {
       setIsProcessing(false);
     }
@@ -368,7 +424,7 @@ export function ReviewProposalModal({
                         Bs. {formatMoney(proposedAmountVES, "VES")}
                       </span>
                       <span className="text-[10px] text-neutral-400 block mt-0.5">
-                        ≈ ${formatMoney(proposal?.total_amount_usd || 0, "USD")} ({proposal?.invoice_count} facturas)
+                        ≈ ${formatMoney(allTotalUSD, "USD")}{allTotalEUR > 0 ? ` | €${formatMoney(allTotalEUR, "EUR")}` : ""} ({proposal?.invoice_count} facturas)
                       </span>
                     </div>
 
@@ -460,7 +516,9 @@ export function ReviewProposalModal({
                               </td>
                             </tr>
                           ) : (
-                            filteredInvoices.map((inv) => (
+                            filteredInvoices.map((inv) => {
+                              const invVES = getProposalInvoiceVESAmount(inv, usdRate, eurRate, isActiveProposal);
+                              return (
                               <tr
                                 key={inv.invoice_id}
                                 className="hover:bg-neutral-50/70 dark:hover:bg-neutral-800/30 transition-colors"
@@ -525,15 +583,16 @@ export function ReviewProposalModal({
                                   )}
                                 </td>
                                 <td className="py-2 px-3 text-right font-mono font-bold text-neutral-900 dark:text-neutral-100">
-                                  <div>Bs. {formatMoney(inv.amount_ves, "VES")}</div>
-                                  {inv.is_indexed && inv.original_amount_ves && (
+                                  <div>Bs. {formatMoney(invVES, "VES")}</div>
+                                  {inv.is_indexed && (
                                     <div className="text-[10px] text-neutral-400 font-normal">
-                                      Ref: Bs. {formatMoney(inv.original_amount_ves, "VES")}
+                                      Orig: {getProposalInvoiceOriginalDisplay(inv, formatMoney)}
                                     </div>
                                   )}
                                 </td>
                               </tr>
-                            ))
+                              );
+                            })
                           )}
                         </tbody>
                         <tfoot className="bg-neutral-50 dark:bg-neutral-800/80 font-bold border-t border-neutral-200 dark:border-neutral-800 text-[11px] sticky bottom-0">
@@ -542,10 +601,10 @@ export function ReviewProposalModal({
                               Total de esta propuesta ({filteredInvoices.length} docs):
                             </td>
                             <td className="py-2 px-3 text-right text-neutral-600 dark:text-neutral-400 font-mono">
-                              ≈ ${formatMoney(proposal?.total_amount_usd || 0, "USD")}
+                              ≈ ${formatMoney(filteredTotalUSD, "USD")}{filteredTotalEUR > 0 ? ` | €${formatMoney(filteredTotalEUR, "EUR")}` : ""}
                             </td>
                             <td className="py-2 px-3 text-right font-mono text-emerald-600 dark:text-emerald-400 font-extrabold">
-                              Bs. {formatMoney(proposedAmountVES, "VES")}
+                              Bs. {formatMoney(filteredTotalVES, "VES")}
                             </td>
                           </tr>
                         </tfoot>

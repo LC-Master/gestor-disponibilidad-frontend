@@ -68,9 +68,11 @@ export interface Invoice {
   islr_retention_amount: number;
   total_amount: number;
   total_amount_usd: number;
+  total_amount_eur?: number;
   equivalent_amount: number;
   net_amount: number;
   net_amount_usd: number;
+  net_amount_eur?: number;
   paid_amount: number;
   is_indexed: boolean;
   early_payment_pct: number;
@@ -85,6 +87,7 @@ export interface CalendarDayAggregate {
   total_invoices: number;
   total_ves: number;
   total_usd: number;
+  total_eur?: number;
   has_overdue: boolean;
   invoices: Invoice[];
 }
@@ -120,9 +123,11 @@ export interface CreateInvoicePayload {
   islr_retention_amount?: number;
   total_amount: number;
   total_amount_usd?: number;
+  total_amount_eur?: number;
   equivalent_amount?: number;
   net_amount?: number;
   net_amount_usd?: number;
+  net_amount_eur?: number;
   paid_amount?: number;
   is_indexed?: boolean;
   early_payment_pct?: number;
@@ -186,6 +191,7 @@ export interface SupplierStatement {
   total_current_usd: number;
   total_paid_ves: number;
   total_paid_usd: number;
+  total_paid_eur?: number;
   open_invoices: Invoice[];
   payment_history: SupplierPaymentHistory[];
 }
@@ -261,6 +267,7 @@ export interface PaymentProposal {
   status: ProposalStatus;
   total_amount_ves: number;
   total_amount_usd: number;
+  total_amount_eur?: number;
   invoice_count: number;
   has_indexed_invoices?: boolean;
   notes?: string;
@@ -287,10 +294,12 @@ export interface ProposalInvoiceDetail {
   currency: string;
   total_amount: number;
   total_amount_usd?: number;
+  total_amount_eur?: number;
   exchange_rate?: number;
   is_indexed?: boolean;
   amount_ves: number;
   amount_usd: number;
+  amount_eur?: number;
   original_amount_ves?: number;
 }
 
@@ -320,6 +329,7 @@ export interface ProposalAdjustmentPayload {
   adjustment_type: "DEBITO" | "CREDITO";
   description: string;
   amount: number;
+  amount_eur?: number;
 }
 
 export interface CreateProposalPayload {
@@ -426,9 +436,22 @@ export interface AiInvoiceRecommendation {
 export interface AiProposalRecommendationsResponse {
   total_recommended_ves: number;
   total_recommended_usd: number;
+  total_recommended_eur?: number;
   quota_available_ves: number;
   quota_usage_pct: number;
   executive_summary: string;
   recommendations: AiInvoiceRecommendation[];
   eligible_invoices?: Invoice[];
+}
+
+export interface PaginationMeta {
+  current_page: number;
+  page_size: number;
+  total_records: number;
+  total_pages: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: PaginationMeta;
 }

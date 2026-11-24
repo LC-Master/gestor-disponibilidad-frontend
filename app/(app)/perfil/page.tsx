@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState, type SubmitEvent } from "react";
 import {
   User,
   ShieldCheck,
@@ -15,14 +15,10 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
 import { useTreasury } from "../tesoreria/context";
-import {
-  profileSchema,
-  changePasswordSchema,
-  ProfileFormData,
-  ChangePasswordFormData,
-} from "@/lib/validations/profile";
+import { ProfileFormData, ChangePasswordFormData, profileSchema, changePasswordSchema } from "@/schemas/profile";
+
 
 export default function PerfilPage() {
   const { user: contextUser, handleRefresh } = useTreasury();
@@ -81,7 +77,7 @@ export default function PerfilPage() {
     }
   }, [contextUser]);
 
-  const handleProfileSubmit = async (e: FormEvent) => {
+  const handleProfileSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setProfileErrors({});
 
@@ -108,7 +104,7 @@ export default function PerfilPage() {
       const responseData = await res.json();
 
       if (!res.ok) {
-        toast.error(responseData.message || "Error al actualizar el perfil.");
+        toast.error(sanitizeErrorMessage(responseData?.message, "Error al actualizar el perfil."));
         return;
       }
 
@@ -130,7 +126,7 @@ export default function PerfilPage() {
     }
   };
 
-  const handlePasswordSubmit = async (e: FormEvent) => {
+  const handlePasswordSubmit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setPasswordErrors({});
 
@@ -162,10 +158,10 @@ export default function PerfilPage() {
       if (!res.ok) {
         if (responseData.error === "INVALID_CURRENT_PASSWORD") {
           setPasswordErrors({
-            current_password: responseData.message || "La contraseña actual no es correcta",
+            current_password: sanitizeErrorMessage(responseData?.message, "La contraseña actual no es correcta"),
           });
         }
-        toast.error(responseData.message || "Error al actualizar la contraseña.");
+        toast.error(sanitizeErrorMessage(responseData?.message, "Error al actualizar la contraseña."));
         return;
       }
 
@@ -282,8 +278,8 @@ export default function PerfilPage() {
                     }
                   }}
                   className={`w-full px-3.5 py-2.5 rounded-xl border text-sm transition-all outline-hidden bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 ${profileErrors.name
-                      ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
-                      : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
+                    ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
+                    : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
                     }`}
                   placeholder="Tu nombre"
                 />
@@ -306,8 +302,8 @@ export default function PerfilPage() {
                     }
                   }}
                   className={`w-full px-3.5 py-2.5 rounded-xl border text-sm transition-all outline-hidden bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 ${profileErrors.last_name
-                      ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
-                      : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
+                    ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
+                    : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
                     }`}
                   placeholder="Tu apellido"
                 />
@@ -370,8 +366,8 @@ export default function PerfilPage() {
                       }
                     }}
                     className={`w-full pl-3.5 pr-10 py-2.5 rounded-xl border text-sm transition-all outline-hidden bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 ${passwordErrors.current_password
-                        ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
+                      ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
                       }`}
                     placeholder="••••••••"
                   />
@@ -412,8 +408,8 @@ export default function PerfilPage() {
                       }
                     }}
                     className={`w-full pl-3.5 pr-10 py-2.5 rounded-xl border text-sm transition-all outline-hidden bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 ${passwordErrors.new_password
-                        ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
+                      ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
                       }`}
                     placeholder="Mínimo 8 caracteres"
                   />
@@ -454,8 +450,8 @@ export default function PerfilPage() {
                       }
                     }}
                     className={`w-full pl-3.5 pr-10 py-2.5 rounded-xl border text-sm transition-all outline-hidden bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 ${passwordErrors.confirm_password
-                        ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
-                        : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
+                      ? "border-rose-500 focus:ring-2 focus:ring-rose-500/30"
+                      : "border-neutral-200 dark:border-neutral-700 focus:border-locatel-medio focus:ring-2 focus:ring-locatel-medio/20"
                       }`}
                     placeholder="Repite la nueva contraseña"
                   />

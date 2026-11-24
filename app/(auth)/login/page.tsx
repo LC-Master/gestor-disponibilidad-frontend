@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { User, Lock, Eye, EyeOff, Loader2, ArrowRight, AlertCircle } from "lucide-react";
 import { loginSchema, type LoginFormData, type ResponseLoginError } from "@/schemas/auth";
+import Image from "next/image";
 
 export default function LoginPage() {
     const [showPassword, setShowPassword] = useState(false);
@@ -62,6 +63,11 @@ export default function LoginPage() {
                     return;
                 }
 
+                if (response.status >= 500) {
+                    setErrorMessage("Error interno en el servidor. Por favor, intente más tarde.");
+                    return;
+                }
+
                 setErrorMessage(errorData?.message || "Error al procesar la solicitud en el servidor.");
                 return;
             }
@@ -86,12 +92,8 @@ export default function LoginPage() {
             } else {
                 window.location.href = "/perfil";
             }
-        } catch (err: unknown) {
-            if (err instanceof Error) {
-                setErrorMessage(err.message);
-            } else {
-                setErrorMessage("Error de conexión con el servidor.");
-            }
+        } catch {
+            setErrorMessage("Error de conexión con el servidor. Verifique su conexión de red.");
         }
     };
 
@@ -99,7 +101,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md px-4 sm:px-0 py-8">
             <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-8 sm:p-10 shadow-xl shadow-neutral-950/5 dark:shadow-black/40">
                 <div className="flex flex-col items-center text-center mb-8">
-                    <img src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
+                    <Image src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
                     <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 mt-2">
                         Iniciar Sesión
                     </h1>

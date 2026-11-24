@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import {
   Building2,
+  ChevronLeft,
+  ChevronRight,
   Edit2,
   Eye,
   FileText,
@@ -13,7 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { ActionMenuPortal } from "@/components/ui/ActionMenuPortal";
 import { Company } from "@/app/(app)/tesoreria/types";
 import { Supplier, CreateSupplierPayload, UpdateSupplierPayload } from "../types";
 import { SupplierStatementView } from "./SupplierStatementView";
@@ -44,12 +47,17 @@ export function SuppliersManagement({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [totalPages, setTotalPages] = useState<number>(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [selectedSupplierStatementId, setSelectedSupplierStatementId] = useState<string | null>(null);
   const [selectedDetailSupplierId, setSelectedDetailSupplierId] = useState<string | null>(null);
+  const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
 
   const [modalRif, setModalRif] = useState("");
   const [modalBusinessName, setModalBusinessName] = useState("");
@@ -71,6 +79,8 @@ export function SuppliersManagement({
     setLoading(true);
     try {
       const params = new URLSearchParams();
+      params.append("page", String(page));
+      params.append("page_size", String(pageSize));
       if (search.trim()) params.append("search", search.trim());
       if (statusFilter !== "all") params.append("status", statusFilter);
 
@@ -78,10 +88,19 @@ export function SuppliersManagement({
       if (!res.ok) {
         throw new Error("Error al obtener la lista de proveedores");
       }
-      const data = await res.json();
-      setSuppliers(Array.isArray(data) ? data : []);
+      const resData = await res.json();
+      if (Array.isArray(resData)) {
+        setSuppliers(resData);
+        setTotalRecords(resData.length);
+        setTotalPages(Math.max(1, Math.ceil(resData.length / pageSize)));
+      } else {
+        const items = Array.isArray(resData?.data) ? resData.data : [];
+        setSuppliers(items);
+        setTotalRecords(resData?.meta?.total_records ?? items.length);
+        setTotalPages(Math.max(1, resData?.meta?.total_pages ?? 1));
+      }
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar proveedores");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar proveedores"));
     } finally {
       setLoading(false);
     }
@@ -92,7 +111,9 @@ export function SuppliersManagement({
       fetchSuppliers();
     }, 250);
     return () => clearTimeout(timer);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, page, pageSize]);
+
+  const paginatedSuppliers = suppliers;
 
   const openCreateModal = () => {
     setEditingSupplier(null);
@@ -125,7 +146,7 @@ export function SuppliersManagement({
     }
   };
 
-  const handleSubmitModal = async (e: React.FormEvent) => {
+  const handleSubmitModal = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!modalBusinessName.trim()) {
       toast.error("La razón social es obligatoria");
@@ -186,7 +207,7 @@ export function SuppliersManagement({
       closeModal();
       fetchSuppliers();
     } catch (err: any) {
-      toast.error(err.message || "Ocurrió un error");
+      toast.error(sanitizeErrorMessage(err, "Ocurrió un error al procesar el proveedor"));
     } finally {
       setIsSubmitting(false);
     }
@@ -211,7 +232,7 @@ export function SuppliersManagement({
         `Proveedor ${supplier.business_name} ${data.is_active ? "activado" : "desactivado"}`
       );
     } catch (err: any) {
-      toast.error(err.message || "Error al actualizar estado");
+      toast.error(sanitizeErrorMessage(err, "Error al actualizar estado"));
     } finally {
       setTogglingId(null);
     }
@@ -236,7 +257,10 @@ export function SuppliersManagement({
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
               placeholder="Buscar por RIF, Razón Social o Código SAP..."
               className="w-full pl-9 pr-4 py-2 bg-neutral-50 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40 focus:border-locatel-medio"
             />
@@ -245,7 +269,10 @@ export function SuppliersManagement({
           <div className="flex items-center gap-2">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as any);
+                setPage(1);
+              }}
               className="px-3 py-2 bg-neutral-50 dark:bg-neutral-800/80 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40 focus:border-locatel-medio cursor-pointer"
             >
               <option value="all">Todos los Estados</option>
@@ -275,9 +302,9 @@ export function SuppliersManagement({
         )}
       </div>
 
-      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400">
+      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col min-h-[calc(100vh-14rem)]">
+        <div className="overflow-x-auto flex-1">
+          <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400 min-w-230">
             <thead className="bg-neutral-50 dark:bg-neutral-800/60 text-neutral-700 dark:text-neutral-300 font-bold uppercase tracking-wider text-[11px] border-b border-neutral-200 dark:border-neutral-800">
               <tr>
                 <th className="py-3 px-4">RIF</th>
@@ -286,13 +313,13 @@ export function SuppliersManagement({
                 <th className="py-3 px-4">Código SAP</th>
                 <th className="py-3 px-4 text-center">Días de Crédito</th>
                 <th className="py-3 px-4 text-center">Estado</th>
-                <th className="py-3 px-4 text-right">Acciones</th>
+                <th className="py-3 px-3 w-12 text-center uppercase tracking-wider">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
               {loading && suppliers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-neutral-400">
+                  <td colSpan={7} className="py-12 text-center text-neutral-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <RefreshCw className="w-6 h-6 animate-spin text-locatel-medio" />
                       <span>Cargando catálogo de proveedores...</span>
@@ -301,7 +328,7 @@ export function SuppliersManagement({
                 </tr>
               ) : suppliers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-neutral-400">
+                  <td colSpan={7} className="py-12 text-center text-neutral-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Building2 className="w-8 h-8 text-neutral-300 dark:text-neutral-600" />
                       <span>No se encontraron proveedores que coincidan con la búsqueda</span>
@@ -309,27 +336,26 @@ export function SuppliersManagement({
                   </td>
                 </tr>
               ) : (
-                suppliers.map((s) => (
+                paginatedSuppliers.map((s) => (
                   <tr
                     key={s.id}
                     className="hover:bg-neutral-50/70 dark:hover:bg-neutral-800/30 transition-colors"
                   >
-                    <td className="py-3.5 px-4 font-mono font-bold text-neutral-900 dark:text-neutral-100">
+                    <td className="py-3.5 px-4 font-mono font-bold text-neutral-900 dark:text-neutral-100 whitespace-nowrap">
                       {s.rif}
                     </td>
                     <td className="py-3.5 px-4 font-medium text-neutral-900 dark:text-neutral-200 max-w-xs truncate">
                       {s.business_name}
                     </td>
-                    <td className="py-3.5 px-4">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
-                        s.supplier_type === "CONSIGNACION"
-                          ? "bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60"
-                          : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60"
-                      }`}>
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${s.supplier_type === "CONSIGNACION"
+                        ? "bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60"
+                        : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60"
+                        }`}>
                         {s.supplier_type || "FIRME"}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 font-mono text-neutral-600 dark:text-neutral-400">
+                    <td className="py-3.5 px-4 font-mono text-neutral-600 dark:text-neutral-400 whitespace-nowrap">
                       {s.sap_vendor_code ? (
                         <span className="px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-[11px] font-semibold">
                           {s.sap_vendor_code}
@@ -338,12 +364,12 @@ export function SuppliersManagement({
                         <span className="text-neutral-400 dark:text-neutral-600">-</span>
                       )}
                     </td>
-                    <td className="py-3.5 px-4 text-center font-semibold text-neutral-800 dark:text-neutral-200">
+                    <td className="py-3.5 px-4 text-center font-semibold text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-[11px]">
                         {s.credit_days} {s.credit_days === 1 ? "día" : "días"}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 text-center">
+                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
                       {s.is_active ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
@@ -356,61 +382,116 @@ export function SuppliersManagement({
                         </span>
                       )}
                     </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => setSelectedDetailSupplierId(s.id)}
-                          className="p-1.5 rounded-lg text-locatel-medio hover:text-locatel-medio/80 hover:bg-locatel-medio/10 dark:hover:bg-emerald-950/40 transition-colors cursor-pointer"
-                          title="Ver Detalle del Proveedor"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
+                    <td className="py-3 px-3 text-center whitespace-nowrap">
+                      <ActionMenuPortal
+                        isOpen={activeActionMenuId === s.id}
+                        onToggle={() => setActiveActionMenuId(activeActionMenuId === s.id ? null : s.id)}
+                        onClose={() => setActiveActionMenuId(null)}
+                      >
                         <button
                           onClick={() => {
+                            setActiveActionMenuId(null);
+                            setSelectedDetailSupplierId(s.id);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-locatel-medio" />
+                          <span>Ver Detalle</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setActiveActionMenuId(null);
                             if (onViewStatement) {
                               onViewStatement(s.id);
                             } else {
                               setSelectedSupplierStatementId(s.id);
                             }
                           }}
-                          className="p-1.5 rounded-lg text-purple-600 hover:text-purple-800 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-colors cursor-pointer"
-                          title="Ver Estado de Cuenta"
+                          className="w-full flex items-center gap-2 px-3 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                         >
-                          <FileText className="w-4 h-4" />
+                          <FileText className="w-3.5 h-3.5 text-purple-600" />
+                          <span>Estado de Cuenta</span>
                         </button>
 
                         {canManageSuppliers && (
                           <>
                             <button
-                              onClick={() => openEditModal(s)}
-                              className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                              title="Editar proveedor"
+                              onClick={() => {
+                                setActiveActionMenuId(null);
+                                openEditModal(s);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                             >
-                              <Edit2 className="w-4 h-4" />
+                              <Edit2 className="w-3.5 h-3.5 text-neutral-500" />
+                              <span>Editar</span>
                             </button>
+
                             <button
-                              onClick={() => handleToggleStatus(s)}
+                              onClick={() => {
+                                setActiveActionMenuId(null);
+                                handleToggleStatus(s);
+                              }}
                               disabled={togglingId === s.id}
-                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${s.is_active
-                                ? "text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40"
-                                : "text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                              className={`w-full flex items-center gap-2 px-3 py-2 transition-colors cursor-pointer ${s.is_active
+                                ? "text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                : "text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
                                 }`}
-                              title={s.is_active ? "Desactivar proveedor" : "Activar proveedor"}
                             >
-                              <Power
-                                className={`w-4 h-4 ${togglingId === s.id ? "animate-spin text-neutral-400" : ""
-                                  }`}
-                              />
+                              <Power className="w-3.5 h-3.5" />
+                              <span>{s.is_active ? "Desactivar" : "Activar"}</span>
                             </button>
                           </>
                         )}
-                      </div>
+                      </ActionMenuPortal>
                     </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
+        </div>
+        <div className="px-4 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3 text-neutral-500 dark:text-neutral-400">
+            <span>
+              Total: <strong className="text-neutral-800 dark:text-neutral-200 font-mono">{totalRecords.toLocaleString("es-VE")}</strong> registros
+            </span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+            >
+              <option value={25}>25 / pág</option>
+              <option value={50}>50 / pág</option>
+              <option value={100}>100 / pág</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Anterior</span>
+            </button>
+            <span className="font-mono text-neutral-600 dark:text-neutral-300 px-2">
+              Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            >
+              <span>Siguiente</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

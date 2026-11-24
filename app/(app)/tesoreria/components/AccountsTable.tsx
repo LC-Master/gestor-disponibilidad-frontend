@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -9,7 +10,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Landmark,
+  Loader2,
   Plus,
+  Power,
   Search,
   SlidersHorizontal,
   X,
@@ -21,6 +24,7 @@ import { useTreasury } from "../context";
 import { companySchema, bankSchema, bankAccountSchema } from "@/schemas/treasury";
 import { z } from "zod"
 import { useFormState } from "@/hooks/useFormState";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface AccountsTableProps {
   accounts: BankAccount[];
@@ -58,7 +62,6 @@ const INITIAL_BANK = {
 };
 
 export function AccountsTable({
-  accounts,
   companies,
   banks,
   onAccountCreated,
@@ -68,11 +71,16 @@ export function AccountsTable({
   const [selectedCompany, setSelectedCompany] = useState<string>("all");
   const [selectedBank, setSelectedBank] = useState<string>("all");
   const [selectedCurrency, setSelectedCurrency] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [globalFilter, setGlobalFilter] = useState<string>("");
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState<number>(15);
+  const [tableAccounts, setTableAccounts] = useState<BankAccount[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState<boolean>(true);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [totalPages, setTotalPages] = useState<number>(1);
 
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -82,8 +90,9 @@ export function AccountsTable({
     if (selectedCompany !== "all") count++;
     if (selectedBank !== "all") count++;
     if (selectedCurrency !== "all") count++;
+    if (statusFilter !== "all") count++;
     return count;
-  }, [selectedCompany, selectedBank, selectedCurrency]);
+  }, [selectedCompany, selectedBank, selectedCurrency, statusFilter]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -118,7 +127,51 @@ export function AccountsTable({
     return perms.includes("treasury.accounts.manage");
   }, [user]);
 
+  const canToggleStatus = useMemo(() => {
+    if (!user) return false;
+    const roles = (user.roles || []).map((r) => r.toUpperCase().trim());
+    if (roles.includes("ADMIN") || roles.includes("ADMINISTRADOR") || roles.includes("COORD_TESORERIA")) return true;
+    const perms = (user.permissions || []).map((p) => p.toLowerCase().trim());
+    return perms.includes("treasury.accounts.status") || perms.includes("treasury.accounts.manage");
+  }, [user]);
+
+  const [confirmToggleAccount, setConfirmToggleAccount] = useState<BankAccount | null>(null);
+  const [isToggling, setIsToggling] = useState<boolean>(false);
+
+  const handleConfirmToggleStatus = async () => {
+    if (!confirmToggleAccount) return;
+    setIsToggling(true);
+    try {
+      const nextStatus = !confirmToggleAccount.is_active;
+      const res = await fetchClient(`/api/v1/treasury/accounts/${confirmToggleAccount.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: nextStatus }),
+      });
+
+      if (!res.ok) {
+        throw new Error("No se pudo cambiar el estado de la cuenta");
+      }
+
+      const updated: BankAccount = await res.json();
+      setTableAccounts((prev) =>
+        prev.map((a) => (a.id === updated.id ? { ...a, is_active: updated.is_active } : a))
+      );
+      toast.success(
+        `Cuenta ${confirmToggleAccount.account_alias} ${updated.is_active ? "activada" : "desactivada"} exitosamente`
+      );
+      setConfirmToggleAccount(null);
+      fetchPaginatedAccounts();
+      onAccountCreated?.();
+    } catch {
+      toast.error("No se pudo cambiar el estado de la cuenta");
+    } finally {
+      setIsToggling(false);
+    }
+  };
+
   const handleSort = (field: SortField) => {
+    setCurrentPage(1);
     if (sortField === field) {
       if (sortDirection === "asc") {
         setSortDirection("desc");
@@ -132,85 +185,70 @@ export function AccountsTable({
     }
   };
 
-  const filteredAndSortedData = useMemo(() => {
-    const result = accounts.filter((item) => {
-      if (selectedCompany !== "all" && item.company_id !== selectedCompany) {
-        return false;
+  const fetchPaginatedAccounts = useCallback(async () => {
+    setLoadingAccounts(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("page", String(currentPage));
+      params.set("page_size", String(pageSize));
+      if (selectedCompany !== "all") {
+        params.set("company_id", selectedCompany);
       }
-      if (selectedBank !== "all" && item.bank_id !== selectedBank) {
-        return false;
+      if (selectedBank !== "all") {
+        params.set("bank_id", selectedBank);
       }
-      if (selectedCurrency !== "all" && item.currency !== selectedCurrency) {
-        return false;
+      if (selectedCurrency !== "all") {
+        params.set("currency", selectedCurrency);
+      }
+      if (statusFilter !== "all") {
+        params.set("status", statusFilter);
       }
       if (globalFilter.trim()) {
-        const query = globalFilter.toLowerCase();
-        const alias = item.account_alias?.toLowerCase() || "";
-        const num = item.account_number?.toLowerCase() || "";
-        const terminal = item.terminal_code?.toLowerCase() || "";
-        const bankName = item.bank?.name?.toLowerCase() || "";
-        const companyName = item.company?.name?.toLowerCase() || "";
-        return (
-          alias.includes(query) ||
-          num.includes(query) ||
-          terminal.includes(query) ||
-          bankName.includes(query) ||
-          companyName.includes(query)
-        );
+        params.set("search", globalFilter.trim());
       }
-      return true;
-    });
+      if (sortField) {
+        params.set("sort_field", sortField);
+        params.set("sort_dir", sortDirection);
+      }
 
-    if (sortField) {
-      result.sort((a, b) => {
-        let valA: string | number = "";
-        let valB: string | number = "";
-
-        if (sortField === "bank") {
-          valA = a.bank?.name?.toLowerCase() || "";
-          valB = b.bank?.name?.toLowerCase() || "";
-        } else if (sortField === "alias") {
-          valA = a.account_alias?.toLowerCase() || "";
-          valB = b.account_alias?.toLowerCase() || "";
-        } else if (sortField === "terminal") {
-          valA = a.terminal_code?.toLowerCase() || "";
-          valB = b.terminal_code?.toLowerCase() || "";
-        } else if (sortField === "currency") {
-          valA = a.currency?.toLowerCase() || "";
-          valB = b.currency?.toLowerCase() || "";
-        } else if (sortField === "balance") {
-          valA = a.current_balance;
-          valB = b.current_balance;
+      const res = await fetchClient(`/api/v1/treasury/accounts?${params.toString()}`);
+      if (res && res.ok) {
+        const json = await res.json();
+        if (json && Array.isArray(json.data) && json.meta) {
+          setTableAccounts(json.data);
+          setTotalRecords(Number(json.meta.total_records || 0));
+          setTotalPages(Math.max(1, Number(json.meta.total_pages || 1)));
+        } else if (Array.isArray(json)) {
+          setTableAccounts(json);
+          setTotalRecords(json.length);
+          setTotalPages(Math.max(1, Math.ceil(json.length / pageSize)));
         }
-
-        if (valA < valB) return sortDirection === "asc" ? -1 : 1;
-        if (valA > valB) return sortDirection === "asc" ? 1 : -1;
-        return 0;
-      });
+      }
+    } catch {
+      toast.error("Error al cargar cuentas bancarias");
+    } finally {
+      setLoadingAccounts(false);
     }
-
-    return result;
   }, [
-    accounts,
+    currentPage,
+    pageSize,
     selectedCompany,
     selectedBank,
     selectedCurrency,
+    statusFilter,
     globalFilter,
     sortField,
     sortDirection,
   ]);
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredAndSortedData.length / pageSize)
-  );
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchPaginatedAccounts();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [fetchPaginatedAccounts]);
 
-  const paginatedData = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredAndSortedData.slice(start, start + pageSize);
-  }, [filteredAndSortedData, currentPage, pageSize]);
-
-  const handleCreateAccount = async (e: React.FormEvent) => {
+  const handleCreateAccount = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     accountForm.setErrors({});
     const selectedBankObj = banks.find((b) => b.id === accountForm.values.bank_id);
@@ -254,6 +292,7 @@ export function AccountsTable({
       setIsModalOpen(false);
       accountForm.reset();
       onAccountCreated();
+      fetchPaginatedAccounts();
     } catch (err: any) {
       const errObj = err?.data?.errors || err?.data;
       if (errObj && typeof errObj === "object" && Object.keys(errObj).length > 0) {
@@ -266,7 +305,7 @@ export function AccountsTable({
     }
   };
 
-  const handleCreateCompany = async (e: React.FormEvent) => {
+  const handleCreateCompany = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     companyForm.setErrors({});
     const parsed = companySchema.safeParse(companyForm.values);
@@ -306,7 +345,7 @@ export function AccountsTable({
     }
   };
 
-  const handleCreateBank = async (e: React.FormEvent) => {
+  const handleCreateBank = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     bankForm.setErrors({});
     const parsed = bankSchema.safeParse(bankForm.values);
@@ -364,23 +403,27 @@ export function AccountsTable({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <div className="flex items-center gap-1.5 px-2.5 h-9 bg-neutral-50/50 dark:bg-neutral-950 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs shadow-2xs">
-            <Building2 className="w-3.5 h-3.5 text-locatel-medio shrink-0" />
-            <select
+          <div className="w-56">
+            <SearchableSelect
               value={selectedCompany}
-              onChange={(e) => {
-                setSelectedCompany(e.target.value);
+              onChange={(val) => {
+                setSelectedCompany(val);
                 setCurrentPage(1);
               }}
-              className="bg-transparent border-none text-xs font-semibold text-neutral-800 dark:text-neutral-200 focus:outline-none cursor-pointer max-w-44 truncate"
-            >
-              <option value="all">Todas las empresas</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code ? `${c.code} · ${c.name}` : c.name}
-                </option>
-              ))}
-            </select>
+              placeholder="Todas las empresas"
+              searchPlaceholder="Buscar empresa por código o nombre..."
+              icon={<Building2 className="w-3.5 h-3.5 text-locatel-medio shrink-0" />}
+              buttonClassName="px-2.5 h-9 bg-neutral-50/50 dark:bg-neutral-950 rounded-lg border border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-800 dark:text-neutral-200 shadow-2xs"
+              options={[
+                { value: "all", label: "Todas las empresas" },
+                ...companies.map((c) => ({
+                  value: c.id,
+                  label: c.code ? `${c.code} · ${c.name}` : c.name,
+                  sublabel: c.rif || undefined,
+                  searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+                })),
+              ]}
+            />
           </div>
 
           <div className="relative" ref={filterRef}>
@@ -414,6 +457,7 @@ export function AccountsTable({
                         setSelectedCompany("all");
                         setSelectedBank("all");
                         setSelectedCurrency("all");
+                        setStatusFilter("all");
                         setCurrentPage(1);
                       }}
                       className="text-[11px] text-locatel-medio hover:underline cursor-pointer font-medium"
@@ -428,42 +472,50 @@ export function AccountsTable({
                     <label className="block text-[11px] font-medium text-neutral-500 mb-1">
                       Empresa
                     </label>
-                    <select
+                    <SearchableSelect
                       value={selectedCompany}
-                      onChange={(e) => {
-                        setSelectedCompany(e.target.value);
+                      onChange={(val) => {
+                        setSelectedCompany(val);
                         setCurrentPage(1);
                       }}
-                      className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer truncate"
-                    >
-                      <option value="all">Todas las Empresas</option>
-                      {companies.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.code ? `${c.code} · ${c.name}` : c.name}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Todas las Empresas"
+                      searchPlaceholder="Buscar por código, nombre o RIF..."
+                      buttonClassName="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200"
+                      options={[
+                        { value: "all", label: "Todas las Empresas" },
+                        ...companies.map((c) => ({
+                          value: c.id,
+                          label: c.code ? `${c.code} · ${c.name}` : c.name,
+                          sublabel: c.rif || undefined,
+                          searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+                        })),
+                      ]}
+                    />
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-medium text-neutral-500 mb-1">
                       Banco
                     </label>
-                    <select
+                    <SearchableSelect
                       value={selectedBank}
-                      onChange={(e) => {
-                        setSelectedBank(e.target.value);
+                      onChange={(val) => {
+                        setSelectedBank(val);
                         setCurrentPage(1);
                       }}
-                      className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer truncate"
-                    >
-                      <option value="all">Todos los Bancos</option>
-                      {banks.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Todos los Bancos"
+                      searchPlaceholder="Buscar banco..."
+                      buttonClassName="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200"
+                      options={[
+                        { value: "all", label: "Todos los Bancos" },
+                        ...banks.map((b) => ({
+                          value: b.id,
+                          label: b.name,
+                          sublabel: b.code || undefined,
+                          searchTerms: `${b.code || ""} ${b.name}`,
+                        })),
+                      ]}
+                    />
                   </div>
 
                   <div>
@@ -482,6 +534,24 @@ export function AccountsTable({
                       <option value="VES">VES (Bolívares)</option>
                       <option value="USD">USD (Dólares)</option>
                       <option value="EUR">EUR (Euros)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-neutral-500 mb-1">
+                      Estado
+                    </label>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => {
+                        setStatusFilter(e.target.value as "all" | "active" | "inactive");
+                        setCurrentPage(1);
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:border-locatel-medio cursor-pointer"
+                    >
+                      <option value="all">Todos los estados</option>
+                      <option value="active">Activas</option>
+                      <option value="inactive">Inactivas</option>
                     </select>
                   </div>
                 </div>
@@ -532,8 +602,8 @@ export function AccountsTable({
         </div>
       </div>
 
-      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto custom-scrollbar">
+      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-sm flex flex-col min-h-[calc(100vh-16rem)]">
+        <div className="overflow-x-auto custom-scrollbar flex-1">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-neutral-200 dark:border-neutral-700 bg-neutral-50/80 dark:bg-neutral-800/60">
@@ -638,20 +708,38 @@ export function AccountsTable({
                 <th className="px-4 py-3.5 text-xs font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider">
                   Estado
                 </th>
+
+                {canToggleStatus && (
+                  <th className="px-4 py-3.5 text-xs font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider text-right">
+                    Acciones
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200/80 dark:divide-neutral-800 text-sm">
-              {paginatedData.length === 0 ? (
+              {loadingAccounts ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={canToggleStatus ? 9 : 8}
+                    className="px-4 py-12 text-center text-xs text-neutral-400 dark:text-neutral-500"
+                  >
+                    <div className="inline-flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-locatel-medio" />
+                      <span>Cargando cuentas bancarias...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : tableAccounts.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={canToggleStatus ? 9 : 8}
                     className="px-4 py-12 text-center text-xs text-neutral-400 dark:text-neutral-500"
                   >
                     No se encontraron cuentas bancarias registradas.
                   </td>
                 </tr>
               ) : (
-                paginatedData.map((item) => (
+                tableAccounts.map((item) => (
                   <tr
                     key={item.id}
                     className="even:bg-neutral-50/30 dark:even:bg-neutral-800/20 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"
@@ -726,6 +814,23 @@ export function AccountsTable({
                         {item.is_active ? "Activa" : "Inactiva"}
                       </span>
                     </td>
+
+                    {canToggleStatus && (
+                      <td className="px-4 py-3.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmToggleAccount(item)}
+                          className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${item.is_active
+                            ? "border-amber-200 dark:border-amber-900/50 bg-amber-50/70 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/50"
+                            : "border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/50"
+                            }`}
+                          title={item.is_active ? "Desactivar cuenta" : "Activar cuenta"}
+                        >
+                          <Power className="w-3.5 h-3.5" />
+                          <span>{item.is_active ? "Desactivar" : "Activar"}</span>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -734,15 +839,29 @@ export function AccountsTable({
         </div>
 
         <div className="px-4 py-3 border-t border-neutral-200 dark:border-neutral-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-neutral-500">
-          <div>
-            Mostrando {paginatedData.length} de {filteredAndSortedData.length}{" "}
-            cuentas
+          <div className="flex items-center gap-3">
+            <span>
+              Mostrando {tableAccounts.length} de {totalRecords} cuentas
+            </span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="px-2 py-1 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+            >
+              <option value={10}>10 por página</option>
+              <option value={15}>15 por página</option>
+              <option value={25}>25 por página</option>
+              <option value={50}>50 por página</option>
+            </select>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage <= 1}
+              disabled={currentPage <= 1 || loadingAccounts}
               className="p-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -752,7 +871,7 @@ export function AccountsTable({
             </span>
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage >= totalPages}
+              disabled={currentPage >= totalPages || loadingAccounts}
               className="p-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
             >
               <ChevronRight className="w-4 h-4" />
@@ -784,27 +903,28 @@ export function AccountsTable({
                   <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1">
                     Empresa *
                   </label>
-                  <select
+                  <SearchableSelect
                     value={accountForm.values.company_id}
-                    onChange={(e) => {
+                    onChange={(val) => {
                       accountForm.setValues({
                         ...accountForm.values,
-                        company_id: e.target.value,
+                        company_id: val,
                       });
                       accountForm.setErrors((prev) => ({ ...prev, company_id: [] }));
                     }}
-                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.company_id?.[0]
-                      ? "border-rose-500 focus:ring-rose-500/30"
+                    placeholder="Seleccione..."
+                    searchPlaceholder="Buscar empresa..."
+                    buttonClassName={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.company_id?.[0]
+                      ? "border-rose-500"
                       : "border-neutral-200 dark:border-neutral-700"
-                      } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
-                  >
-                    <option value="">Seleccione...</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                      } text-neutral-800 dark:text-neutral-200`}
+                    options={companies.map((c) => ({
+                      value: c.id,
+                      label: c.code ? `${c.code} · ${c.name}` : c.name,
+                      sublabel: c.rif || undefined,
+                      searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+                    }))}
+                  />
                   {accountForm.errors.company_id && (
                     <p className="text-rose-600 text-xs mt-1">{accountForm.errors.company_id[0]}</p>
                   )}
@@ -814,26 +934,27 @@ export function AccountsTable({
                   <label className="block text-xs font-semibold text-neutral-600 dark:text-neutral-300 mb-1">
                     Banco *
                   </label>
-                  <select
+                  <SearchableSelect
                     value={accountForm.values.bank_id}
-                    onChange={(e) => {
-                      accountForm.setValues({ ...accountForm.values, bank_id: e.target.value });
+                    onChange={(val) => {
+                      accountForm.setValues({ ...accountForm.values, bank_id: val });
                       if (accountForm.errors.bank_id) {
                         accountForm.setErrors((prev) => ({ ...prev, bank_id: [] }));
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.bank_id
-                      ? "border-rose-500 focus:ring-rose-500/30"
+                    placeholder="Seleccione..."
+                    searchPlaceholder="Buscar banco..."
+                    buttonClassName={`w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-neutral-800 border ${accountForm.errors.bank_id?.[0]
+                      ? "border-rose-500"
                       : "border-neutral-200 dark:border-neutral-700"
-                      } text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40`}
-                  >
-                    <option value="">Seleccione...</option>
-                    {banks.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} {b.is_cash ? "(Caja/Efectivo)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                      } text-neutral-800 dark:text-neutral-200`}
+                    options={banks.map((b) => ({
+                      value: b.id,
+                      label: `${b.name}${b.is_cash ? " (Caja/Efectivo)" : ""}`,
+                      sublabel: b.code || undefined,
+                      searchTerms: `${b.code || ""} ${b.name}`,
+                    }))}
+                  />
                   {accountForm.errors.bank_id && (
                     <p className="text-rose-600 text-xs mt-1">{accountForm.errors.bank_id[0]}</p>
                   )}
@@ -1254,6 +1375,65 @@ export function AccountsTable({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {confirmToggleAccount && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl max-w-md w-full p-5 shadow-2xl relative space-y-4 animate-in fade-in zoom-in-95 duration-100">
+            <div className="flex items-start gap-3">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${confirmToggleAccount.is_active
+                  ? "bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400"
+                  : "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400"
+                  }`}
+              >
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
+                  {confirmToggleAccount.is_active ? "Desactivar Cuenta" : "Activar Cuenta"}
+                </h4>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                  ¿Está seguro que desea{" "}
+                  <span className="font-semibold text-neutral-800 dark:text-neutral-200">
+                    {confirmToggleAccount.is_active ? "desactivar" : "activar"}
+                  </span>{" "}
+                  la cuenta bancaria{" "}
+                  <span className="font-semibold text-neutral-800 dark:text-neutral-200">
+                    {confirmToggleAccount.account_alias}
+                  </span>
+                  ?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isToggling}
+                onClick={() => setConfirmToggleAccount(null)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isToggling}
+                onClick={handleConfirmToggleStatus}
+                className={`px-4 py-2 text-xs font-semibold rounded-xl text-white disabled:opacity-50 cursor-pointer ${confirmToggleAccount.is_active
+                  ? "bg-amber-600 hover:bg-amber-700"
+                  : "bg-locatel-medio hover:bg-locatel-oscuro"
+                  }`}
+              >
+                {isToggling
+                  ? "Procesando..."
+                  : confirmToggleAccount.is_active
+                    ? "Confirmar Desactivación"
+                    : "Confirmar Activación"}
+              </button>
+            </div>
           </div>
         </div>
       )}

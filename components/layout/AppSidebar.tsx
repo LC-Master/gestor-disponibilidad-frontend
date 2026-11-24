@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   Building2,
@@ -11,6 +12,7 @@ import {
   FileCheck2,
   FileText,
   History,
+  Landmark,
   Layers,
   LogOut,
   PanelLeftClose,
@@ -100,38 +102,60 @@ export function AppSidebar({
     roles.includes("COORD_TESORERIA") ||
     roles.includes("ANALISTA_TESORERIA");
 
+  const canViewTreasuryCompanies =
+    hasPerm("treasury.companies.view") ||
+    hasPerm("treasury.companies.edit") ||
+    hasPerm("treasury.companies.status") ||
+    hasPerm("treasury.companies.manage") ||
+    hasPerm("treasury.accounts.manage") ||
+    roles.includes("COORD_TESORERIA");
+
+  const canViewTreasuryBanks =
+    hasPerm("treasury.banks.view") ||
+    hasPerm("treasury.banks.edit") ||
+    hasPerm("treasury.banks.status") ||
+    hasPerm("treasury.banks.manage") ||
+    hasPerm("treasury.accounts.manage") ||
+    roles.includes("COORD_TESORERIA");
+
   const canViewInvoices =
-    hasPerm("cxp.invoices.view") ||
-    roles.includes("COORD_CXP") ||
-    roles.includes("ANALISTA_CXP");
+    !roles.includes("COORD_TESORERIA") &&
+    (hasPerm("cxp.invoices.view") ||
+      roles.includes("COORD_CXP") ||
+      roles.includes("ANALISTA_CXP"));
 
   const canViewProposals =
-    hasPerm("cxp.proposals.view") ||
-    hasPerm("cxp.proposals.create") ||
-    roles.includes("COORD_CXP") ||
-    roles.includes("ANALISTA_CXP");
+    !roles.includes("COORD_TESORERIA") &&
+    (hasPerm("cxp.proposals.view") ||
+      hasPerm("cxp.proposals.create") ||
+      roles.includes("COORD_CXP") ||
+      roles.includes("ANALISTA_CXP"));
 
   const canViewScheduled =
     hasPerm("cxp.payments.schedule") ||
     hasPerm("cxp.payments.approve") ||
     hasPerm("cxp.payments.execute") ||
-    roles.includes("COORD_CXP");
+    roles.includes("COORD_CXP") ||
+    roles.includes("COORD_TESORERIA");
 
   const canViewPaymentsHistory =
-    hasPerm("cxp.reports.view") ||
-    hasPerm("cxp.payments.view") ||
-    roles.includes("COORD_CXP") ||
-    roles.includes("ANALISTA_CXP");
+    !roles.includes("COORD_TESORERIA") &&
+    (hasPerm("cxp.reports.view") ||
+      hasPerm("cxp.payments.view") ||
+      roles.includes("COORD_CXP") ||
+      roles.includes("ANALISTA_CXP"));
 
   const canViewCalendar =
-    hasPerm("cxp.calendar.view") ||
-    roles.includes("COORD_CXP") ||
-    roles.includes("ANALISTA_CXP");
+    !roles.includes("COORD_TESORERIA") &&
+    (hasPerm("cxp.calendar.view") ||
+      roles.includes("COORD_CXP") ||
+      roles.includes("ANALISTA_CXP"));
 
   const canViewSuppliers =
-    hasPerm("cxp.suppliers.view") ||
-    hasPerm("cxp.suppliers.manage") ||
-    roles.includes("COORD_CXP");
+    !roles.includes("COORD_TESORERIA") &&
+    (hasPerm("cxp.suppliers.view") ||
+      hasPerm("cxp.suppliers.manage") ||
+      roles.includes("COORD_CXP"));
 
   const isAnalystOnly =
     (roles.includes("ANALISTA_TESORERIA") || roles.includes("ANALISTA_CXP")) &&
@@ -155,6 +179,24 @@ export function AppSidebar({
           label: "Gestión de Cuentas",
           icon: Wallet,
           badge: accounts.length > 0 ? accounts.length.toString() : undefined,
+        },
+      ]
+      : []),
+    ...(canViewTreasuryCompanies
+      ? [
+        {
+          href: "/tesoreria/empresas",
+          label: "Maestro de Empresas",
+          icon: Building2,
+        },
+      ]
+      : []),
+    ...(canViewTreasuryBanks
+      ? [
+        {
+          href: "/tesoreria/bancos",
+          label: "Maestro de Bancos",
+          icon: Landmark,
         },
       ]
       : []),
@@ -325,7 +367,7 @@ export function AppSidebar({
       {!collapsed ? (
         <div className="h-16 px-4 flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <img
+            <Image
               src="/Logo.webp"
               alt="Locatel"
               className="h-9 w-auto object-contain shrink-0"
@@ -360,7 +402,7 @@ export function AppSidebar({
       ) : (
         <div className="py-3 px-2 flex flex-col items-center justify-center gap-2 border-b border-neutral-100 dark:border-neutral-800 shrink-0">
           <div className="flex justify-center items-center py-1">
-            <img
+            <Image
               src="/Logo-res.webp"
               alt="Locatel"
               className="h-8 w-auto object-contain"

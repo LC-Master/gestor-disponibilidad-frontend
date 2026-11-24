@@ -10,10 +10,14 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { getCurrentRates } from "@/lib/exchangeRates";
+import { getInvoiceVESAmount } from "@/lib/invoiceTotals";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { Company } from "@/app/(app)/tesoreria/types";
 import {
   AiProposalRecommendationsResponse,
+  CurrentRatesResponse,
   Invoice,
 } from "../types";
 
@@ -29,23 +33,30 @@ export function ProposalAiAnalysisModal({
   isOpen,
   onClose,
   companies,
-  selectedCompanyId = "ALL",
+  selectedCompanyId,
   onLoadIntoProposal,
 }: ProposalAiAnalysisModalProps) {
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
-  const [companyId, setCompanyId] = useState<string>(selectedCompanyId || "ALL");
+  const [companyId, setCompanyId] = useState<string>(() =>
+    selectedCompanyId && selectedCompanyId !== "ALL" ? selectedCompanyId : companies[0]?.id || ""
+  );
   const [targetDate, setTargetDate] = useState<string>(() => {
     return new Date().toISOString().split("T")[0];
   });
   const [data, setData] = useState<AiProposalRecommendationsResponse | null>(null);
+  const [rates, setRates] = useState<CurrentRatesResponse | null>(null);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(
     new Set()
   );
 
   useEffect(() => {
-    setCompanyId(selectedCompanyId || "ALL");
-  }, [selectedCompanyId]);
+    if (selectedCompanyId && selectedCompanyId !== "ALL") {
+      setCompanyId(selectedCompanyId);
+    } else if (companies.length > 0 && (!companyId || companyId === "ALL")) {
+      setCompanyId(companies[0].id);
+    }
+  }, [selectedCompanyId, companies, companyId]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -61,14 +72,14 @@ export function ProposalAiAnalysisModal({
   }, [loading]);
 
   const runAnalysis = async () => {
+    const activeCompanyId = companyId && companyId !== "ALL" ? companyId : companies[0]?.id || "";
+    if (!activeCompanyId) return;
     setLoading(true);
     try {
       const payload: Record<string, any> = {
         target_date: targetDate,
+        company_id: activeCompanyId,
       };
-      if (companyId && companyId !== "ALL") {
-        payload.company_id = companyId;
-      }
 
       const res = await fetchClient("/api/cxp/proposals/ai-recommendations", {
         method: "POST",
@@ -93,7 +104,7 @@ export function ProposalAiAnalysisModal({
       );
       setSelectedInvoiceIds(allRecommendedIds);
     } catch (err: any) {
-      toast.error(err.message || "Fallo en el motor de optimización de pagos");
+      toast.error(sanitizeErrorMessage(err, "Fallo en el motor de optimización de pagos"));
       setData(null);
     } finally {
       setLoading(false);
@@ -103,6 +114,11 @@ export function ProposalAiAnalysisModal({
   useEffect(() => {
     if (isOpen) {
       runAnalysis();
+      getCurrentRates()
+        .then((res) => {
+          if (res) setRates(res);
+        })
+        .catch(() => {});
     } else {
       setData(null);
       setSelectedInvoiceIds(new Set());
@@ -130,12 +146,33 @@ export function ProposalAiAnalysisModal({
     }
   };
 
+  const invoiceMap = useMemo(() => {
+    const map = new Map<string, Invoice>();
+    (data?.eligible_invoices || []).forEach((inv) => {
+      map.set(inv.id, inv);
+    });
+    return map;
+  }, [data?.eligible_invoices]);
+
+  const derivedUsdRate =
+    data && data.total_recommended_ves > 0 && data.total_recommended_usd > 0
+      ? data.total_recommended_ves / data.total_recommended_usd
+      : 0;
+  const activeUsdRate =
+    rates?.dolar?.Valor && rates.dolar.Valor > 0
+      ? rates.dolar.Valor
+      : derivedUsdRate > 0
+        ? derivedUsdRate
+        : 1.0;
+  const activeEurRate = rates?.euro?.Valor && rates.euro.Valor > 0 ? rates.euro.Valor : 0;
+
   const computedTotals = useMemo(() => {
     const quotaVES = data?.quota_available_ves || 0;
     if (!data?.recommendations) {
       return {
         totalVES: 0,
         totalUSD: 0,
+        totalEUR: 0,
         remanenteVES: quotaVES,
         usagePct: 0,
         count: 0,
@@ -146,35 +183,39 @@ export function ProposalAiAnalysisModal({
     let count = 0;
     for (const rec of data.recommendations) {
       if (selectedInvoiceIds.has(rec.invoice_id)) {
-        sumVES += rec.net_amount_ves;
+        const matched = invoiceMap.get(rec.invoice_id);
+        if (matched) {
+          sumVES += getInvoiceVESAmount(matched, activeUsdRate, activeEurRate);
+        } else {
+          const curr = (rec.currency || "VES").toUpperCase().trim();
+          if (curr === "VES") {
+            sumVES += rec.net_amount_ves > 0 ? rec.net_amount_ves : rec.net_amount || 0;
+          } else if (curr === "EUR" && activeEurRate > 0) {
+            sumVES += (rec.net_amount || 0) * activeEurRate;
+          } else if (curr === "USD" && activeUsdRate > 0) {
+            sumVES += (rec.net_amount || 0) * activeUsdRate;
+          } else {
+            sumVES += rec.net_amount_ves || rec.net_amount || 0;
+          }
+        }
         count += 1;
       }
     }
 
     const remanenteVES = Math.max(0, quotaVES - sumVES);
     const usagePct = quotaVES > 0 ? (sumVES / quotaVES) * 100 : 0;
-    const exchangeRate =
-      data.total_recommended_ves > 0 && data.total_recommended_usd > 0
-        ? data.total_recommended_ves / data.total_recommended_usd
-        : 1.0;
-    const sumUSD = exchangeRate > 0 ? sumVES / exchangeRate : 0;
+    const sumUSD = activeUsdRate > 0 ? sumVES / activeUsdRate : 0;
+    const sumEUR = activeEurRate > 0 ? sumVES / activeEurRate : 0;
 
     return {
       totalVES: sumVES,
       totalUSD: sumUSD,
+      totalEUR: sumEUR,
       remanenteVES,
       usagePct,
       count,
     };
-  }, [data, selectedInvoiceIds]);
-
-  const invoiceMap = useMemo(() => {
-    const map = new Map<string, Invoice>();
-    (data?.eligible_invoices || []).forEach((inv) => {
-      map.set(inv.id, inv);
-    });
-    return map;
-  }, [data?.eligible_invoices]);
+  }, [data, selectedInvoiceIds, invoiceMap, activeUsdRate, activeEurRate]);
 
   const handleApply = () => {
     if (selectedInvoiceIds.size === 0) {
@@ -227,9 +268,11 @@ export function ProposalAiAnalysisModal({
             islr_retention_amount: 0,
             total_amount: rec.net_amount,
             total_amount_usd: 0,
+            total_amount_eur: 0,
             equivalent_amount: rec.net_amount,
             net_amount: rec.net_amount,
             net_amount_usd: 0,
+            net_amount_eur: 0,
             paid_amount: 0,
             is_indexed: false,
             early_payment_pct: 0,
@@ -326,19 +369,21 @@ export function ProposalAiAnalysisModal({
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1.5">
               <span className="text-neutral-500 font-medium text-[11px]">Empresa:</span>
-              <select
+              <SearchableSelect
                 value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
+                onChange={(val) => setCompanyId(val)}
                 disabled={loading}
-                className="px-2.5 py-1 rounded bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 font-medium text-xs focus:outline-none focus:ring-1 focus:ring-neutral-400 cursor-pointer"
-              >
-                <option value="ALL">Todas las Empresas (Global)</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.code ? `${c.code} · ${c.name}` : c.name}
-                  </option>
-                ))}
-              </select>
+                placeholder="Seleccionar empresa..."
+                searchPlaceholder="Buscar por código, nombre o RIF..."
+                className="w-60"
+                buttonClassName="px-2.5 py-1 rounded bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 font-medium text-xs"
+                options={companies.map((c) => ({
+                  value: c.id,
+                  label: c.code ? `${c.code} · ${c.name}` : c.name,
+                  sublabel: c.rif,
+                  searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+                }))}
+              />
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -409,6 +454,10 @@ export function ProposalAiAnalysisModal({
                 </div>
                 <span className="text-sm md:text-base font-bold font-mono tabular-nums text-neutral-900 dark:text-neutral-50 mt-1">
                   {formatMoney(computedTotals.totalVES, "VES")}
+                </span>
+                <span className="text-[10px] font-mono tabular-nums text-neutral-400">
+                  ≈ {formatMoney(computedTotals.totalUSD, "USD")}
+                  {computedTotals.totalEUR > 0 && ` | ${formatMoney(computedTotals.totalEUR, "EUR")}`}
                 </span>
               </div>
 
@@ -558,13 +607,21 @@ export function ProposalAiAnalysisModal({
                         </div>
 
                         <div className="flex items-center gap-3 shrink-0 text-right">
-                          <span className="font-mono text-xs text-neutral-500 tabular-nums">
-                            {formatMoney(rec.net_amount, rec.currency)}
-                          </span>
-
-                          <span className="font-mono text-xs font-bold text-neutral-900 dark:text-neutral-100 tabular-nums">
-                            {formatMoney(rec.net_amount_ves, "VES")}
-                          </span>
+                          <div className="flex flex-col items-end">
+                            <span className="font-mono text-xs font-bold text-neutral-900 dark:text-neutral-100 tabular-nums">
+                              {formatMoney(
+                                matchedInv
+                                  ? getInvoiceVESAmount(matchedInv, activeUsdRate, activeEurRate)
+                                  : rec.net_amount_ves,
+                                "VES"
+                              )}
+                            </span>
+                            {(matchedInv?.is_indexed || (rec.currency || "").toUpperCase() !== "VES") && (
+                              <span className="font-mono text-[10px] text-neutral-400 tabular-nums">
+                                Orig: {formatMoney(matchedInv?.total_amount ?? rec.net_amount, matchedInv?.currency ?? rec.currency)}
+                              </span>
+                            )}
+                          </div>
 
                           {rec.early_payment_discount > 0 && (
                             <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-1.5 py-0.5 rounded shrink-0">

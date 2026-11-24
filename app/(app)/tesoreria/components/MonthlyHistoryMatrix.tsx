@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { BankAccount, Company, DailyAccountBalance } from "../types";
 import { fetchClient } from "@/lib/fetchClient";
+import { getCurrentRates } from "@/lib/exchangeRates";
 
 interface MonthlyHistoryMatrixProps {
   companies: Company[];
@@ -60,6 +61,36 @@ export function MonthlyHistoryMatrix({
   const [sorting, setSorting] = useState<SortingState>([]);
   const [viewMode, setViewMode] = useState<"matrix" | "cards" | "analytics">("matrix");
   const [hoveredDay, setHoveredDay] = useState<number | null>(null);
+  const [bcvRate, setBcvRate] = useState<number>(0);
+
+  const fetchBcvRate = async () => {
+    try {
+      const rates = await getCurrentRates();
+      if (rates?.dolar?.Valor && rates.dolar.Valor > 0) {
+        setBcvRate(rates.dolar.Valor);
+      }
+    } catch {
+      // Silenciar error en carga de tasa
+    }
+  };
+
+  useEffect(() => {
+    fetchBcvRate();
+  }, []);
+
+  const formatVES = (val: number) => {
+    return new Intl.NumberFormat("es-VE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(val);
+  };
+
+  const formatUSD = (val: number) => {
+    return new Intl.NumberFormat("es-VE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(val);
+  };
 
   useEffect(() => {
     if (!selectedCompanyId) {
@@ -79,6 +110,7 @@ export function MonthlyHistoryMatrix({
 
   const fetchHistory = async () => {
     setLoading(true);
+    fetchBcvRate();
     try {
       const monthStr = String(selectedMonth).padStart(2, "0");
       const startDate = `${selectedYear}-${monthStr}-01`;
@@ -94,8 +126,8 @@ export function MonthlyHistoryMatrix({
         const data = await res.json();
         setHistoryData(Array.isArray(data) ? data : []);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Silenciar error en carga de matriz histórica
     } finally {
       setLoading(false);
     }
@@ -280,7 +312,7 @@ export function MonthlyHistoryMatrix({
         columnHelper.accessor(dayKey as any, {
           header: () => (
             <div
-              className={`flex flex-col items-center justify-center py-0.5 px-1 min-w-19 ${meta?.isWeekend ? "text-neutral-400 dark:text-neutral-500" : "text-neutral-700 dark:text-neutral-200"
+              className={`flex flex-col items-center justify-center py-0.5 px-1 min-w-22 ${meta?.isWeekend ? "text-neutral-400 dark:text-neutral-500" : "text-neutral-700 dark:text-neutral-200"
                 }`}
             >
               <span className="text-[10px] uppercase font-bold tracking-wider">
@@ -301,13 +333,21 @@ export function MonthlyHistoryMatrix({
               );
             }
             return (
-              <div className="text-right py-1 px-1">
-                <span className="font-mono text-xs font-semibold text-neutral-900 dark:text-neutral-100 tabular-nums block">
-                  {new Intl.NumberFormat("es-VE", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }).format(val)}
+              <div className="text-right py-1 px-1 min-w-0">
+                <span
+                  className="font-mono text-xs font-semibold text-neutral-900 dark:text-neutral-100 tabular-nums block truncate"
+                  title={`${formatVES(val)} ${selectedCurrency}`}
+                >
+                  {formatVES(val)}
                 </span>
+                {selectedCurrency === "VES" && bcvRate > 0 && (
+                  <span
+                    className="text-[10px] font-mono text-neutral-400 dark:text-neutral-500 tabular-nums block truncate"
+                    title={`≈ $ ${formatUSD(val / bcvRate)} USD`}
+                  >
+                    ~${formatUSD(val / bcvRate)}
+                  </span>
+                )}
               </div>
             );
           },
@@ -316,7 +356,7 @@ export function MonthlyHistoryMatrix({
     }
 
     return cols;
-  }, [daysInMonth, dayMetadata]);
+  }, [daysInMonth, dayMetadata, selectedCurrency, bcvRate]);
 
   const table = useTable({
     features: stockFeatures,
@@ -457,86 +497,138 @@ export function MonthlyHistoryMatrix({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="p-4.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
-          <div className="flex items-center justify-between text-xs text-neutral-500 mb-1.5">
-            <span className="font-semibold">Último Saldo Registrado</span>
-            <Wallet className="w-4 h-4 text-locatel-medio" />
+        <div className="p-4.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col justify-between overflow-hidden">
+          <div>
+            <div className="flex items-center justify-between text-xs text-neutral-500 mb-1.5">
+              <span className="font-semibold">Último Saldo Registrado</span>
+              <Wallet className="w-4 h-4 text-locatel-medio shrink-0" />
+            </div>
+            <div
+              className="text-lg sm:text-xl lg:text-2xl font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums tracking-tight truncate"
+              title={`${formatVES(kpis.currentTotal)} ${selectedCurrency}`}
+            >
+              {formatVES(kpis.currentTotal)}{" "}
+              <span className="text-xs font-bold text-locatel-medio">{selectedCurrency}</span>
+            </div>
+            <div className="text-xs font-mono text-neutral-500 dark:text-neutral-400 font-medium tabular-nums mt-0.5 truncate">
+              {selectedCurrency === "VES" ? (
+                <span>≈ $ {formatUSD(bcvRate > 0 ? kpis.currentTotal / bcvRate : 0)} USD</span>
+              ) : selectedCurrency === "USD" ? (
+                bcvRate > 0 ? <span>≈ Bs. {formatVES(kpis.currentTotal * bcvRate)}</span> : null
+              ) : (
+                bcvRate > 0 ? <span>≈ $ {formatUSD(kpis.currentTotal / bcvRate)} USD</span> : null
+              )}
+            </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums">
-            {new Intl.NumberFormat("es-VE", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            }).format(kpis.currentTotal)}{" "}
-            <span className="text-xs font-bold text-locatel-medio">{selectedCurrency}</span>
-          </div>
-          <p className="text-xs text-neutral-400 mt-1">
+          <p className="text-xs text-neutral-400 mt-2 truncate">
             {kpis.latestDay > 0
               ? `Consolidado día ${kpis.latestDay}`
               : "Sin registros este mes"}
           </p>
         </div>
 
-        <div className="p-4.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
-          <div className="flex items-center justify-between text-xs text-neutral-500 mb-1.5">
-            <span className="font-semibold">Variación Mensual Neta</span>
-            {kpis.netChange >= 0 ? (
-              <TrendingUp className="w-4 h-4 text-emerald-500" />
-            ) : (
-              <TrendingDown className="w-4 h-4 text-red-500" />
-            )}
+        <div className="p-4.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col justify-between overflow-hidden">
+          <div>
+            <div className="flex items-center justify-between text-xs text-neutral-500 mb-1.5">
+              <span className="font-semibold">Variación Mensual Neta</span>
+              {kpis.netChange >= 0 ? (
+                <TrendingUp className="w-4 h-4 text-emerald-500 shrink-0" />
+              ) : (
+                <TrendingDown className="w-4 h-4 text-red-500 shrink-0" />
+              )}
+            </div>
+            <div
+              className={`text-lg sm:text-xl lg:text-2xl font-bold font-mono tabular-nums tracking-tight truncate ${kpis.netChange > 0
+                ? "text-emerald-600 dark:text-emerald-400"
+                : kpis.netChange < 0
+                  ? "text-red-500"
+                  : "text-neutral-800 dark:text-neutral-200"
+                }`}
+              title={`${kpis.netChange > 0 ? "+" : ""}${formatVES(kpis.netChange)} ${selectedCurrency}`}
+            >
+              {kpis.netChange > 0 ? "+" : ""}
+              {formatVES(kpis.netChange)}{" "}
+              <span className="text-xs font-normal text-neutral-500">{selectedCurrency}</span>
+            </div>
+            <div className="text-xs font-mono text-neutral-500 dark:text-neutral-400 font-medium tabular-nums mt-0.5 truncate">
+              {selectedCurrency === "VES" ? (
+                <span>
+                  ≈ {kpis.netChange > 0 ? "+" : kpis.netChange < 0 ? "-" : ""}$ {formatUSD(bcvRate > 0 ? Math.abs(kpis.netChange) / bcvRate : 0)} USD
+                </span>
+              ) : selectedCurrency === "USD" ? (
+                bcvRate > 0 ? (
+                  <span>
+                    ≈ {kpis.netChange > 0 ? "+" : kpis.netChange < 0 ? "-" : ""}Bs. {formatVES(Math.abs(kpis.netChange) * bcvRate)}
+                  </span>
+                ) : null
+              ) : (
+                bcvRate > 0 ? (
+                  <span>
+                    ≈ {kpis.netChange > 0 ? "+" : kpis.netChange < 0 ? "-" : ""}$ {formatUSD(Math.abs(kpis.netChange) / bcvRate)} USD
+                  </span>
+                ) : null
+              )}
+            </div>
           </div>
-          <div
-            className={`text-2xl font-bold font-mono tabular-nums ${kpis.netChange > 0
-              ? "text-emerald-600 dark:text-emerald-400"
-              : kpis.netChange < 0
-                ? "text-red-500"
-                : "text-neutral-800 dark:text-neutral-200"
-              }`}
-          >
-            {kpis.netChange > 0 ? "+" : ""}
-            {new Intl.NumberFormat("es-VE", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            }).format(kpis.netChange)}{" "}
-            <span className="text-xs font-normal text-neutral-500">{selectedCurrency}</span>
-          </div>
-          <p className="text-xs text-neutral-400 mt-1">
+          <p className="text-xs text-neutral-400 mt-2 truncate">
             Diferencia entre primer y último día registrado
           </p>
         </div>
 
-        <div className="p-4.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
-          <div className="flex items-center justify-between text-xs text-neutral-500 mb-1.5">
-            <span className="font-semibold">Pico de Liquidez</span>
-            <Coins className="w-4 h-4 text-locatel-oro" />
+        <div className="p-4.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col justify-between overflow-hidden">
+          <div>
+            <div className="flex items-center justify-between text-xs text-neutral-500 mb-1.5">
+              <span className="font-semibold">Pico de Liquidez</span>
+              <Coins className="w-4 h-4 text-locatel-oro shrink-0" />
+            </div>
+            <div
+              className="text-lg sm:text-xl lg:text-2xl font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums tracking-tight truncate"
+              title={`${formatVES(kpis.peakBalance)} ${selectedCurrency}`}
+            >
+              {formatVES(kpis.peakBalance)}{" "}
+              <span className="text-xs font-bold text-locatel-oro">{selectedCurrency}</span>
+            </div>
+            <div className="text-xs font-mono text-neutral-500 dark:text-neutral-400 font-medium tabular-nums mt-0.5 truncate">
+              {selectedCurrency === "VES" ? (
+                <span>≈ $ {formatUSD(bcvRate > 0 ? kpis.peakBalance / bcvRate : 0)} USD</span>
+              ) : selectedCurrency === "USD" ? (
+                bcvRate > 0 ? <span>≈ Bs. {formatVES(kpis.peakBalance * bcvRate)}</span> : null
+              ) : (
+                bcvRate > 0 ? <span>≈ $ {formatUSD(kpis.peakBalance / bcvRate)} USD</span> : null
+              )}
+            </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums">
-            {new Intl.NumberFormat("es-VE", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            }).format(kpis.peakBalance)}{" "}
-            <span className="text-xs font-bold text-locatel-oro">{selectedCurrency}</span>
-          </div>
-          <p className="text-xs text-neutral-400 mt-1">
+          <p className="text-xs text-neutral-400 mt-2 truncate">
             {kpis.peakDay > 0
               ? `Máximo alcanzado el día ${kpis.peakDay}`
               : "Sin movimientos"}
           </p>
         </div>
 
-        <div className="p-4.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
-          <div className="flex items-center justify-between text-xs text-neutral-500 mb-1.5">
-            <span className="font-semibold">Promedio Diario Consolidado</span>
-            <Building2 className="w-4 h-4 text-locatel-claro" />
+        <div className="p-4.5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col justify-between overflow-hidden">
+          <div>
+            <div className="flex items-center justify-between text-xs text-neutral-500 mb-1.5">
+              <span className="font-semibold">Promedio Diario Consolidado</span>
+              <Building2 className="w-4 h-4 text-locatel-claro shrink-0" />
+            </div>
+            <div
+              className="text-lg sm:text-xl lg:text-2xl font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums tracking-tight truncate"
+              title={`${formatVES(kpis.avgDailyBalance)} ${selectedCurrency}`}
+            >
+              {formatVES(kpis.avgDailyBalance)}{" "}
+              <span className="text-xs font-normal text-neutral-500">{selectedCurrency}</span>
+            </div>
+            <div className="text-xs font-mono text-neutral-500 dark:text-neutral-400 font-medium tabular-nums mt-0.5 truncate">
+              {selectedCurrency === "VES" ? (
+                <span>≈ $ {formatUSD(bcvRate > 0 ? kpis.avgDailyBalance / bcvRate : 0)} USD</span>
+              ) : selectedCurrency === "USD" ? (
+                bcvRate > 0 ? <span>≈ Bs. {formatVES(kpis.avgDailyBalance * bcvRate)}</span> : null
+              ) : (
+                bcvRate > 0 ? <span>≈ $ {formatUSD(kpis.avgDailyBalance / bcvRate)} USD</span> : null
+              )}
+            </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums">
-            {new Intl.NumberFormat("es-VE", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            }).format(kpis.avgDailyBalance)}{" "}
-            <span className="text-xs font-normal text-neutral-500">{selectedCurrency}</span>
-          </div>
-          <p className="text-xs text-neutral-400 mt-1">
+          <p className="text-xs text-neutral-400 mt-2 truncate">
             {kpis.accountsCount} cuentas evaluadas en el período
           </p>
         </div>
@@ -647,11 +739,13 @@ export function MonthlyHistoryMatrix({
                   Día {hoveredDay} ({dayMetadata[hoveredDay]?.weekday}):
                 </span>
                 <span className="font-bold font-mono text-neutral-900 dark:text-neutral-100">
-                  {new Intl.NumberFormat("es-VE", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  }).format(dailyTotals[hoveredDay]?.sum || 0)}{" "}
+                  {formatVES(dailyTotals[hoveredDay]?.sum || 0)}{" "}
                   {selectedCurrency}
+                  {selectedCurrency === "VES" && bcvRate > 0 && (
+                    <span className="text-neutral-500 dark:text-neutral-400 font-normal ml-1">
+                      (~ $ {formatUSD((dailyTotals[hoveredDay]?.sum || 0) / bcvRate)})
+                    </span>
+                  )}
                 </span>
               </div>
             )}
@@ -719,7 +813,8 @@ export function MonthlyHistoryMatrix({
               </span>
             </div>
             <span className="font-mono text-neutral-600 dark:text-neutral-400">
-              Promedio: {new Intl.NumberFormat("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(kpis.avgDailyBalance)} {selectedCurrency}
+              Promedio: {formatVES(kpis.avgDailyBalance)} {selectedCurrency}
+              {selectedCurrency === "VES" && bcvRate > 0 && ` (~ $ ${formatUSD(kpis.avgDailyBalance / bcvRate)})`}
             </span>
           </div>
         </div>
@@ -763,24 +858,26 @@ export function MonthlyHistoryMatrix({
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-100 dark:border-neutral-800">
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-[10px] uppercase font-semibold text-neutral-400 block">
                       Saldo Cierre
                     </span>
-                    <span className="text-base font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums">
-                      {new Intl.NumberFormat("es-VE", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      }).format(acc.currentBalance)}
+                    <span className="text-base font-bold font-mono text-neutral-900 dark:text-neutral-100 tabular-nums block truncate">
+                      {formatVES(acc.currentBalance)}
                     </span>
+                    {selectedCurrency === "VES" && bcvRate > 0 && (
+                      <span className="text-[11px] font-mono text-neutral-400 dark:text-neutral-500 tabular-nums block truncate">
+                        ~ $ {formatUSD(acc.currentBalance / bcvRate)}
+                      </span>
+                    )}
                   </div>
 
-                  <div>
+                  <div className="min-w-0">
                     <span className="text-[10px] uppercase font-semibold text-neutral-400 block">
                       Variación Mes
                     </span>
                     <span
-                      className={`text-sm font-bold font-mono tabular-nums flex items-center gap-1 mt-0.5 ${acc.net > 0
+                      className={`text-sm font-bold font-mono tabular-nums flex items-center gap-1 mt-0.5 truncate ${acc.net > 0
                         ? "text-emerald-600 dark:text-emerald-400"
                         : acc.net < 0
                           ? "text-red-500"
@@ -788,11 +885,13 @@ export function MonthlyHistoryMatrix({
                         }`}
                     >
                       {acc.net > 0 ? "+" : ""}
-                      {new Intl.NumberFormat("es-VE", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      }).format(acc.net)}
+                      {formatVES(acc.net)}
                     </span>
+                    {selectedCurrency === "VES" && bcvRate > 0 && (
+                      <span className="text-[11px] font-mono text-neutral-400 dark:text-neutral-500 tabular-nums block truncate">
+                        ~ $ {formatUSD(Math.abs(acc.net) / bcvRate)}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -913,13 +1012,25 @@ export function MonthlyHistoryMatrix({
                       return (
                         <td
                           key={`total_${day}`}
-                          className="py-3 px-2 text-right font-mono text-xs font-bold text-neutral-900 dark:text-neutral-100 tabular-nums whitespace-nowrap"
+                          className="py-2.5 px-2 text-right font-mono text-xs font-bold text-neutral-900 dark:text-neutral-100 tabular-nums whitespace-nowrap"
                         >
                           {hasData ? (
-                            new Intl.NumberFormat("es-VE", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            }).format(dayTotal)
+                            <div className="min-w-0">
+                              <span
+                                className="block truncate"
+                                title={`${formatVES(dayTotal)} ${selectedCurrency}`}
+                              >
+                                {formatVES(dayTotal)}
+                              </span>
+                              {selectedCurrency === "VES" && bcvRate > 0 && (
+                                <span
+                                  className="text-[10px] font-normal text-neutral-500 dark:text-neutral-400 block truncate"
+                                  title={`≈ $ ${formatUSD(dayTotal / bcvRate)} USD`}
+                                >
+                                  ~${formatUSD(dayTotal / bcvRate)}
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-neutral-300 dark:text-neutral-600 font-normal">
                               —

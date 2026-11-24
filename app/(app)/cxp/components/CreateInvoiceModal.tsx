@@ -13,40 +13,13 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, isTechnicalError, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { Company } from "@/app/(app)/tesoreria/types";
 import { Supplier } from "../types";
 import { getSpecificRate } from "@/lib/exchangeRates";
-import { z } from "zod";
-
-const invoiceSchema = z
-  .object({
-    company_id: z.string().min(1, "Seleccione una empresa"),
-    supplier_id: z.string().min(1, "Seleccione un proveedor"),
-    invoice_number: z.string().trim().min(1, "Ingrese el número de factura").max(50, "El número de factura es demasiado largo"),
-    control_number: z.string().trim().max(50, "El número de control es demasiado largo").optional(),
-    purchase_order_number: z.string().trim().max(50, "La orden de compra es demasiado larga").optional(),
-    issue_date: z.string().min(1, "Ingrese la fecha de emisión"),
-    reception_date: z.string().min(1, "Ingrese la fecha de recepción"),
-    due_date: z.string().min(1, "Ingrese la fecha de vencimiento"),
-    currency: z.enum(["VES", "USD", "EUR"]),
-    exchange_rate: z.number().positive("La tasa de cambio debe ser mayor a cero"),
-    subtotal: z.number().positive("El subtotal debe ser mayor a cero"),
-    discount_amount: z.number().min(0, "El descuento no puede ser negativo"),
-    exempt_amount: z.number().min(0, "El monto exento no puede ser negativo"),
-    vat_retention_pct: z.number().min(0).max(100, "Retención IVA inválida"),
-    islr_retention_pct: z.number().min(0).max(100, "Retención ISLR debe estar entre 0 y 100"),
-    early_payment_pct: z.number().min(0).max(100, "Pronto pago debe estar entre 0 y 100"),
-    total_amount: z.number().positive("El total de la factura debe ser mayor a cero"),
-  })
-  .refine((d) => d.due_date >= d.issue_date, {
-    path: ["due_date"],
-    message: "El vencimiento no puede ser anterior a la emisión",
-  })
-  .refine((d) => d.discount_amount <= d.subtotal, {
-    path: ["discount_amount"],
-    message: "El descuento no puede exceder el subtotal",
-  });
+import { invoiceSchema } from "@/schemas/invoces";
+import Image from "next/image";
 
 interface CreateInvoiceModalProps {
   isOpen: boolean;
@@ -92,7 +65,8 @@ export function CreateInvoiceModal({
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   // Tracks whether the file analysis succeeded and returned a drive file ID
-  const [analysisSucceeded, setAnalysisSucceeded] = useState(false);
+  // oxlint-disable-next-line no-unused-vars
+  const [analysisSucceded, setAnalysisSucceeded] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDuplicateError, setIsDuplicateError] = useState(false);
@@ -200,14 +174,18 @@ export function CreateInvoiceModal({
             const json = JSON.parse(rawText);
             extractedMsg = json.error || json.message || json.detail || "";
           } catch {
-            extractedMsg = rawText;
+            extractedMsg = "";
           }
         } catch {
           extractedMsg = "";
         }
 
+        if (res.status >= 500) {
+          throw new Error("Error en el servidor al analizar la factura. Intente nuevamente.");
+        }
+
         if (res.status === 422) {
-          throw new Error(extractedMsg || "El documento adjunto no parece ser una factura válida o no contiene datos fiscales legibles.");
+          throw new Error(extractedMsg && !isTechnicalError(extractedMsg) ? extractedMsg : "El documento adjunto no parece ser una factura válida o no contiene datos fiscales legibles.");
         }
 
         if (res.status === 429 || extractedMsg.includes("limite de peticiones")) {
@@ -227,23 +205,35 @@ export function CreateInvoiceModal({
         }
 
         if (res.status === 400) {
-          throw new Error(extractedMsg || "El archivo enviado no es una imagen válida o está dañado.");
+          throw new Error(extractedMsg && !isTechnicalError(extractedMsg) ? extractedMsg : "El archivo enviado no es una imagen válida o está dañado.");
         }
 
-        if (extractedMsg) {
+        if (extractedMsg && !isTechnicalError(extractedMsg)) {
           throw new Error(extractedMsg);
         }
 
-        throw new Error(`Error ${res.status}: Fallo en el servidor al analizar la factura`);
+        throw new Error("No se pudo procesar la factura con el motor de IA.");
       }
 
       const data = await res.json();
 
+      setAnalysisSucceeded(true);
       if (data.drive_file_id) {
         setDriveFileId(data.drive_file_id);
-        setAnalysisSucceeded(true);
       } else {
-        setAnalysisSucceeded(false);
+        const uploadFd = new FormData();
+        uploadFd.append("file", file);
+        fetchClient("/api/v1/cxp/invoices/attachment", {
+          method: "POST",
+          body: uploadFd,
+        })
+          .then((upRes) => (upRes.ok ? upRes.json() : null))
+          .then((upData) => {
+            if (upData?.drive_file_id) {
+              setDriveFileId(upData.drive_file_id);
+            }
+          })
+          .catch(() => { });
       }
 
       const cleanRif = (r?: string) => (r ? r.toUpperCase().replace(/[^A-Z0-9]/g, "") : "");
@@ -360,7 +350,7 @@ export function CreateInvoiceModal({
       setPreviewFileType(null);
       setAttachedFile(null);
       setAnalyzedFileName(null);
-      toast.error(err?.message || "Error al procesar la factura con Gemini AI", {
+      toast.error(sanitizeErrorMessage(err, "Error al procesar la factura con Gemini AI"), {
         duration: 3000,
         closeButton: true,
       });
@@ -592,7 +582,7 @@ export function CreateInvoiceModal({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     setSubmitted(true);
@@ -604,7 +594,7 @@ export function CreateInvoiceModal({
     setIsSubmitting(true);
     try {
       let finalDriveFileId = driveFileId;
-      if (attachedFile && !finalDriveFileId && analysisSucceeded) {
+      if (attachedFile && !finalDriveFileId) {
         const fd = new FormData();
         fd.append("file", attachedFile);
         const upRes = await fetchClient("/api/v1/cxp/invoices/attachment", {
@@ -648,7 +638,11 @@ export function CreateInvoiceModal({
         islr_retention_pct: islrRetentionPct,
         islr_retention_amount: islrRetentionAmount,
         total_amount: totalAmount,
+        total_amount_usd: currency === "USD" ? totalAmount : 0,
+        total_amount_eur: currency === "EUR" ? totalAmount : 0,
         net_amount: netAmount,
+        net_amount_usd: currency === "USD" ? netAmount : 0,
+        net_amount_eur: currency === "EUR" ? netAmount : 0,
         is_indexed: currency === "VES" ? isIndexed : false,
         early_payment_pct: earlyPaymentPct,
         drive_file_id: finalDriveFileId || undefined,
@@ -682,7 +676,7 @@ export function CreateInvoiceModal({
         });
         return;
       }
-      toast.error(err.message || "Error al registrar la factura", {
+      toast.error(sanitizeErrorMessage(err, "Error al registrar la factura"), {
         duration: 3000,
         closeButton: true,
       });
@@ -805,7 +799,7 @@ export function CreateInvoiceModal({
                   />
                 ) : (
                   <div className="w-full h-full overflow-auto flex items-center justify-center p-2">
-                    <img
+                    <Image
                       src={previewBlobUrl}
                       alt={analyzedFileName || "Documento"}
                       style={{ transform: `scale(${zoom / 100})` }}
@@ -877,43 +871,43 @@ export function CreateInvoiceModal({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div className={errors.company_id ? "[&_select]:border-rose-500!" : ""}>
+                <div className={errors.company_id ? "[&_button]:border-rose-500!" : ""}>
                   <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300 block mb-1">
                     Empresa Compradora
                   </label>
-                  <select
+                  <SearchableSelect
                     value={companyId}
-                    onChange={(e) => setCompanyId(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg bg-neutral-50/50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/80 dark:focus:ring-locatel-claro/80 focus:border-locatel-medio transition-all shadow-2xs"
-                    required
-                  >
-                    <option value="">Seleccione Empresa</option>
-                    {companies.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.rif})
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setCompanyId(val)}
+                    placeholder="Seleccione Empresa"
+                    searchPlaceholder="Buscar por nombre, código o RIF..."
+                    buttonClassName="w-full px-3 py-2 text-xs rounded-lg bg-neutral-50/50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-2xs"
+                    options={companies.map((c) => ({
+                      value: c.id,
+                      label: `${c.name} (${c.rif})`,
+                      sublabel: c.code ? `Código: ${c.code}` : undefined,
+                      searchTerms: `${c.name} ${c.rif || ""} ${c.code || ""}`,
+                    }))}
+                  />
                   {fieldError("company_id")}
                 </div>
 
-                <div className={errors.supplier_id ? "[&_select]:border-rose-500!" : ""}>
+                <div className={errors.supplier_id ? "[&_button]:border-rose-500!" : ""}>
                   <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300 block mb-1">
                     Proveedor Emisor
                   </label>
-                  <select
+                  <SearchableSelect
                     value={supplierId}
-                    onChange={(e) => setSupplierId(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg bg-neutral-50/50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/80 dark:focus:ring-locatel-claro/80 focus:border-locatel-medio transition-all shadow-2xs"
-                    required
-                  >
-                    <option value="">Seleccione Proveedor</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.business_name} ({s.rif}) - [{s.supplier_type || "FIRME"}]
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setSupplierId(val)}
+                    placeholder="Seleccione Proveedor"
+                    searchPlaceholder="Buscar por RIF, nombre o código SAP..."
+                    buttonClassName="w-full px-3 py-2 text-xs rounded-lg bg-neutral-50/50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-2xs"
+                    options={suppliers.map((s) => ({
+                      value: s.id,
+                      label: `${s.business_name} (${s.rif}) - [${s.supplier_type || "FIRME"}]`,
+                      sublabel: s.sap_vendor_code ? `SAP: ${s.sap_vendor_code}` : undefined,
+                      searchTerms: `${s.business_name} ${s.rif} ${s.sap_vendor_code || ""}`,
+                    }))}
+                  />
                   {fieldError("supplier_id")}
                 </div>
               </div>
@@ -1199,7 +1193,7 @@ export function CreateInvoiceModal({
                   {fieldError("islr_retention_pct")}
                 </div>
 
-                {/* <div className="p-3 rounded-lg border border-neutral-200/80 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/40 space-y-1.5">
+                <div className="p-3 rounded-lg border border-neutral-200/80 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/40 space-y-1.5">
                   <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300 block">
                     Monto IGTF
                   </span>
@@ -1213,7 +1207,7 @@ export function CreateInvoiceModal({
                       className="w-full px-3 py-1.5 text-xs font-mono font-medium rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-900 dark:focus:ring-neutral-100 text-right tabular-nums"
                     />
                   </div>
-                </div> */}
+                </div>
               </div>
             </div>
 
@@ -1408,9 +1402,9 @@ export function CreateInvoiceModal({
                         Contravalor Estimado
                       </span>
                       <p className="font-mono font-bold text-xl tracking-tight text-neutral-800 dark:text-neutral-200 tabular-nums">
-                        {currency === "USD"
-                          ? formatMoney(equivalentVES, "VES")
-                          : formatMoney(equivalentUSD, "USD")}
+                        {currency === "VES"
+                          ? formatMoney(equivalentUSD, "USD")
+                          : formatMoney(equivalentVES, "VES")}
                       </p>
                     </div>
                   </div>

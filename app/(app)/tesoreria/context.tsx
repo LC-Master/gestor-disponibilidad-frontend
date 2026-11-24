@@ -35,8 +35,8 @@ export function TreasuryProvider({ children }: { children: ReactNode }) {
         const u = await userRes.json();
         setUser(u);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Sesión no autenticada o fallo de conexión
     }
 
     try {
@@ -87,8 +87,8 @@ export function TreasuryProvider({ children }: { children: ReactNode }) {
       await fetchClient("/api/auth/logout", {
         method: "POST",
       });
-    } catch (err) {
-      console.error(err);
+    } catch {
+      // Sesión no autenticada o fallo de conexión
     } finally {
       clearAuthSession();
       window.location.href = "/login";

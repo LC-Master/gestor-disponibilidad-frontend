@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
 import { Bank, Company } from "@/app/(app)/tesoreria/types";
 import { SupplierDetailsResponse } from "../types";
 
@@ -32,7 +32,7 @@ export function SupplierDetailModal({
   isOpen,
   onClose,
   supplierId,
-  companies = [],
+  companies,
   banks = [],
   canEdit = true,
 }: SupplierDetailModalProps) {
@@ -70,7 +70,7 @@ export function SupplierDetailModal({
       const data: SupplierDetailsResponse = await res.json();
       setDetails(data);
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar datos del proveedor");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar datos del proveedor"));
     } finally {
       setLoading(false);
     }
@@ -110,7 +110,7 @@ export function SupplierDetailModal({
     }, 2000);
   };
 
-  const handleCreateAccount = async (e: React.FormEvent) => {
+  const handleCreateAccount = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!supplierId) return;
 
@@ -158,7 +158,7 @@ export function SupplierDetailModal({
       setShowAddAccountForm(false);
       fetchDetails();
     } catch (err: any) {
-      toast.error(err.message || "No se pudo guardar la cuenta");
+      toast.error(sanitizeErrorMessage(err, "No se pudo guardar la cuenta"));
     } finally {
       setIsSubmittingAccount(false);
     }
@@ -182,7 +182,7 @@ export function SupplierDetailModal({
       toast.success("Cuenta bancaria eliminada");
       fetchDetails();
     } catch (err: any) {
-      toast.error(err.message || "No se pudo eliminar la cuenta");
+      toast.error(sanitizeErrorMessage(err, "No se pudo eliminar la cuenta"));
     } finally {
       setDeletingAccountId(null);
     }

@@ -30,8 +30,8 @@ export function InvoiceAuditTrailModal({
           const data = await res.json();
           setLogs(Array.isArray(data) ? data : []);
         }
-      } catch (err) {
-        console.error(err);
+      } catch {
+        // Error silencioso al consultar logs de auditoría
       } finally {
         setLoading(false);
       }

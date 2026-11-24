@@ -45,6 +45,12 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
     if (pathname.startsWith("/tesoreria/matriz")) {
       return "Tesorería - Matriz Histórica Mensual";
     }
+    if (pathname.startsWith("/tesoreria/empresas")) {
+      return "Tesorería - Maestro de Empresas";
+    }
+    if (pathname.startsWith("/tesoreria/bancos")) {
+      return "Tesorería - Maestro de Bancos";
+    }
     if (pathname.startsWith("/tesoreria")) {
       return "Tesorería - Gestión de Cuentas Bancarias";
     }
@@ -115,6 +121,28 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
       );
     }
 
+    if (pathname.startsWith("/tesoreria/empresas")) {
+      return (
+        hasPerm("treasury.companies.view") ||
+        hasPerm("treasury.companies.edit") ||
+        hasPerm("treasury.companies.status") ||
+        hasPerm("treasury.companies.manage") ||
+        hasPerm("treasury.accounts.manage") ||
+        roles.includes("COORD_TESORERIA")
+      );
+    }
+
+    if (pathname.startsWith("/tesoreria/bancos")) {
+      return (
+        hasPerm("treasury.banks.view") ||
+        hasPerm("treasury.banks.edit") ||
+        hasPerm("treasury.banks.status") ||
+        hasPerm("treasury.banks.manage") ||
+        hasPerm("treasury.accounts.manage") ||
+        roles.includes("COORD_TESORERIA")
+      );
+    }
+
     if (pathname.startsWith("/tesoreria")) {
       return (
         hasPerm("treasury.accounts.view") ||
@@ -125,6 +153,7 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
     }
 
     if (pathname.startsWith("/cxp/facturas")) {
+      if (roles.includes("COORD_TESORERIA")) return false;
       return (
         hasPerm("cxp.invoices.view") ||
         roles.includes("COORD_CXP") ||
@@ -133,6 +162,7 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
     }
 
     if (pathname.startsWith("/cxp/propuestas")) {
+      if (roles.includes("COORD_TESORERIA")) return false;
       return (
         hasPerm("cxp.proposals.view") ||
         hasPerm("cxp.proposals.create") ||
@@ -146,11 +176,13 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
         hasPerm("cxp.payments.schedule") ||
         hasPerm("cxp.payments.approve") ||
         hasPerm("cxp.payments.execute") ||
-        roles.includes("COORD_CXP")
+        roles.includes("COORD_CXP") ||
+        roles.includes("COORD_TESORERIA")
       );
     }
 
     if (pathname.startsWith("/cxp/historico")) {
+      if (roles.includes("COORD_TESORERIA")) return false;
       return (
         hasPerm("cxp.reports.view") ||
         hasPerm("cxp.payments.view") ||
@@ -160,6 +192,7 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
     }
 
     if (pathname.startsWith("/cxp/calendario")) {
+      if (roles.includes("COORD_TESORERIA")) return false;
       return (
         hasPerm("cxp.calendar.view") ||
         roles.includes("COORD_CXP") ||
@@ -168,6 +201,7 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
     }
 
     if (pathname.startsWith("/cxp/proveedores")) {
+      if (roles.includes("COORD_TESORERIA")) return false;
       return (
         hasPerm("cxp.suppliers.view") ||
         hasPerm("cxp.suppliers.manage") ||

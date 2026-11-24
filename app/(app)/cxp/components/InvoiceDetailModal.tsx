@@ -18,9 +18,10 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient, getStoredAccessToken } from "@/lib/fetchClient";
+import { fetchClient, getStoredAccessToken, sanitizeErrorMessage } from "@/lib/fetchClient";
 import { getCurrentRates } from "@/lib/exchangeRates";
 import { Invoice, CurrentRatesResponse } from "../types";
+import Image from "next/image";
 
 interface InvoiceDetailModalProps {
   isOpen: boolean;
@@ -57,6 +58,7 @@ export function InvoiceDetailModal({
   const [currentRates, setCurrentRates] = useState<CurrentRatesResponse | null>(null);
 
   const blobUrlRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -69,7 +71,28 @@ export function InvoiceDetailModal({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen && fileBlobUrl) {
+      URL.revokeObjectURL(fileBlobUrl);
+      if (blobUrlRef.current === fileBlobUrl) {
+        blobUrlRef.current = null;
+      }
+    }
+    return () => {
+      if (fileBlobUrl) {
+        URL.revokeObjectURL(fileBlobUrl);
+        if (blobUrlRef.current === fileBlobUrl) {
+          blobUrlRef.current = null;
+        }
+      }
+    };
+  }, [isOpen, fileBlobUrl]);
+
+  useEffect(() => {
     if (!isOpen) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       if (blobUrlRef.current) {
         URL.revokeObjectURL(blobUrlRef.current);
         blobUrlRef.current = null;
@@ -87,15 +110,22 @@ export function InvoiceDetailModal({
       return;
     }
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     if (initialInvoice) {
       setInvoice(initialInvoice);
-      loadFile(initialInvoice);
-      return;
+      loadFile(initialInvoice, controller.signal);
+    } else if (invoiceId) {
+      fetchInvoice(invoiceId, controller.signal);
     }
 
-    if (invoiceId) {
-      fetchInvoice(invoiceId);
-    }
+    return () => {
+      controller.abort();
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+    };
   }, [isOpen, invoiceId, initialInvoice]);
 
   useEffect(() => {
@@ -154,28 +184,32 @@ export function InvoiceDetailModal({
     return (basePayable * earlyPct) / 100;
   }, [invoice, earlyPaymentPct, previewVatRetAmount, previewIslrRetAmount]);
 
-  const fetchInvoice = async (id: string) => {
+  const fetchInvoice = async (id: string, signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const res = await fetchClient(`/api/cxp/invoices/${id}`);
+      const res = await fetchClient(`/api/cxp/invoices/${id}`, { signal });
       if (!res.ok) {
         throw new Error("No se pudo obtener la información de la factura");
       }
       const data: Invoice = await res.json();
+      if (signal?.aborted) return;
       setInvoice(data);
-      loadFile(data);
+      loadFile(data, signal);
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar la factura", {
+      if (err?.name === "AbortError" || signal?.aborted) return;
+      toast.error(sanitizeErrorMessage(err, "Error al cargar la factura"), {
         duration: 3000,
         closeButton: true,
       });
       onClose();
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
-  const loadFile = async (inv: Invoice) => {
+  const loadFile = async (inv: Invoice, signal?: AbortSignal) => {
     if (!inv.drive_file_id) {
       setFileBlobUrl(null);
       setFileType(null);
@@ -184,13 +218,30 @@ export function InvoiceDetailModal({
       return;
     }
 
+    let activeSignal = signal;
+    if (!activeSignal) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      activeSignal = controller.signal;
+    }
+
     setFileLoading(true);
     setFileError(null);
 
     try {
       const token = getStoredAccessToken();
-      const endpoint = `/api/v1/invoices/${inv.id}/file${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-      const res = await fetchClient(endpoint);
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
+      let res = await fetchClient(`/api/v1/invoices/${inv.id}/file${tokenParam}`, {
+        signal: activeSignal,
+      });
+      if (!res.ok) {
+        res = await fetchClient(`/api/v1/cxp/invoices/${inv.id}/file${tokenParam}`, {
+          signal: activeSignal,
+        });
+      }
 
       if (!res.ok) {
         throw new Error(`El servidor respondió con código ${res.status}`);
@@ -198,6 +249,7 @@ export function InvoiceDetailModal({
 
       const contentType = res.headers.get("content-type") || "";
       const blob = await res.blob();
+      if (activeSignal.aborted) return;
       const url = URL.createObjectURL(blob);
 
       if (blobUrlRef.current) {
@@ -217,10 +269,13 @@ export function InvoiceDetailModal({
         setFileType("pdf");
       }
     } catch (err: any) {
-      setFileError(err.message || "Error al cargar el archivo de la factura");
+      if (err?.name === "AbortError" || activeSignal.aborted) return;
+      setFileError(sanitizeErrorMessage(err, "Error al cargar el archivo de la factura"));
       setFileBlobUrl(null);
     } finally {
-      setFileLoading(false);
+      if (!activeSignal.aborted) {
+        setFileLoading(false);
+      }
     }
   };
 
@@ -357,7 +412,7 @@ export function InvoiceDetailModal({
         closeButton: true,
       });
     } catch (err: any) {
-      toast.error(err.message || "No se pudieron actualizar las condiciones financieras", {
+      toast.error(sanitizeErrorMessage(err, "No se pudieron actualizar las condiciones financieras"), {
         duration: 3000,
         closeButton: true,
       });
@@ -380,7 +435,7 @@ export function InvoiceDetailModal({
   const baseNetPayableVES = invoice
     ? invoice.currency === "VES"
       ? invoice.net_amount
-      : invoice.net_amount_usd * invoice.exchange_rate
+      : invoice.net_amount * invoice.exchange_rate
     : 0;
 
   const earlyDiscountVES = invoice && currentEarlyPct > 0
@@ -389,26 +444,29 @@ export function InvoiceDetailModal({
 
   const netPayableVES = Math.max(0, baseNetPayableVES - earlyDiscountVES);
 
-  const baseNetPayableUSD = invoice
-    ? invoice.currency === "USD"
-      ? invoice.net_amount_usd || invoice.net_amount
-      : invoice.exchange_rate > 0
+  const foreignCurrency = invoice?.currency === "EUR" ? "EUR" : "USD";
+
+  const baseNetPayableForeign = invoice
+    ? invoice.currency === "VES"
+      ? invoice.exchange_rate > 0
         ? invoice.net_amount / invoice.exchange_rate
         : 0
+      : invoice.net_amount
     : 0;
 
-  const earlyDiscountUSD = invoice && currentEarlyPct > 0
-    ? (baseNetPayableUSD * currentEarlyPct) / 100
+  const earlyDiscountForeign = invoice && currentEarlyPct > 0
+    ? (baseNetPayableForeign * currentEarlyPct) / 100
     : 0;
 
-  const netPayableUSD = Math.max(0, baseNetPayableUSD - earlyDiscountUSD);
+  const netPayableForeign = Math.max(0, baseNetPayableForeign - earlyDiscountForeign);
+  const netPayableUSD = netPayableForeign;
 
-  const grossUSD = invoice
-    ? invoice.total_amount_usd > 0
-      ? invoice.total_amount_usd
-      : invoice.exchange_rate > 0
+  const grossForeign = invoice
+    ? invoice.currency === "VES"
+      ? invoice.exchange_rate > 0
         ? invoice.total_amount / invoice.exchange_rate
         : 0
+      : invoice.total_amount
     : 0;
 
   const indexedCalculations = useMemo(() => {
@@ -445,8 +503,12 @@ export function InvoiceDetailModal({
     if (!isVES) {
       const todayRate = isEUR ? (rateEUR > 0 ? rateEUR : emissionRate) : (rateUSD > 0 ? rateUSD : emissionRate);
       const currencySymbol = isEUR ? "EUR" : "USD";
-      const totalForeign = invoice.total_amount_usd > 0 ? invoice.total_amount_usd : invoice.total_amount;
-      const netForeign = isUSD ? netPayableUSD : (invoice.net_amount_usd > 0 ? invoice.net_amount_usd : invoice.net_amount);
+      const totalForeign = isEUR
+        ? (invoice.total_amount_eur && invoice.total_amount_eur > 0 ? invoice.total_amount_eur : invoice.total_amount)
+        : (invoice.total_amount_usd && invoice.total_amount_usd > 0 ? invoice.total_amount_usd : invoice.total_amount);
+      const netForeign = isEUR
+        ? (invoice.net_amount_eur && invoice.net_amount_eur > 0 ? invoice.net_amount_eur : invoice.net_amount)
+        : (isUSD ? netPayableUSD : (invoice.net_amount_usd > 0 ? invoice.net_amount_usd : invoice.net_amount));
       const todayTotalVES = totalForeign * todayRate;
       const todayNetPayableVES = netForeign * todayRate;
       const emissionNetPayableVES = netForeign * emissionRate;
@@ -596,7 +658,7 @@ export function InvoiceDetailModal({
                 />
               ) : (
                 <div className="w-full h-full overflow-auto flex items-center justify-center p-2">
-                  <img
+                  <Image
                     src={fileBlobUrl}
                     alt={`Factura-${invoice?.invoice_number || "Doc"}`}
                     style={{ transform: `scale(${zoom / 100})` }}
@@ -974,7 +1036,7 @@ export function InvoiceDetailModal({
                     </table>
                   </div>
 
-                  <div className="space-y-1.5 pt-1 text-xs">
+                  <div className="space-y-1.5 pt-1 pb-2 text-xs">
                     <div className="flex justify-between items-center text-neutral-600 dark:text-neutral-400">
                       <span>Retención IVA ({invoice.vat_retention_pct}%):</span>
                       <span className="font-mono font-medium text-rose-600 dark:text-rose-400 tabular-nums">
@@ -1016,9 +1078,9 @@ export function InvoiceDetailModal({
                         </span>
                       </div>
                       <div className="text-right">
-                        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 block">Equivalente Divisa</span>
+                        <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 block">Equivalente {foreignCurrency}</span>
                         <span className="font-mono font-medium text-neutral-600 dark:text-neutral-400 text-sm tabular-nums">
-                          {formatMoney(grossUSD, "USD")}
+                          {formatMoney(grossForeign, foreignCurrency)}
                         </span>
                       </div>
                     </div>
@@ -1035,10 +1097,10 @@ export function InvoiceDetailModal({
                         </div>
                         <div className="text-right">
                           <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 block">
-                            Equivalente Neto USD
+                            Equivalente Neto {foreignCurrency}
                           </span>
                           <p className="font-mono font-semibold text-lg tracking-tight text-neutral-700 dark:text-neutral-300 tabular-nums">
-                            {formatMoney(netPayableUSD, "USD")}
+                            {formatMoney(netPayableForeign, foreignCurrency)}
                           </p>
                         </div>
                       </div>

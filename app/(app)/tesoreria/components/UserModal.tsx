@@ -39,6 +39,51 @@ export const PERMISSION_METADATA_MAP: Record<string, PermissionMeta> = {
     description: "Registrar, actualizar y configurar cuentas y terminales bancarios de empresas.",
     category: "Tesorería",
   },
+  "treasury.accounts.status": {
+    title: "Estatus de Cuentas",
+    description: "Activar y desactivar cuentas bancarias en el catálogo de tesorería.",
+    category: "Tesorería",
+  },
+  "treasury.banks.view": {
+    title: "Consulta de Bancos",
+    description: "Visualizar el catálogo de bancos registrados en el sistema.",
+    category: "Tesorería",
+  },
+  "treasury.banks.edit": {
+    title: "Edición de Bancos",
+    description: "Modificar nombre, código SUDEBAN y modalidad de bancos.",
+    category: "Tesorería",
+  },
+  "treasury.banks.status": {
+    title: "Estatus de Bancos",
+    description: "Activar y desactivar bancos dentro del catálogo de tesorería.",
+    category: "Tesorería",
+  },
+  "treasury.banks.manage": {
+    title: "Gestión Integral de Bancos",
+    description: "Crear, editar, activar y desactivar bancos del sistema.",
+    category: "Tesorería",
+  },
+  "treasury.companies.view": {
+    title: "Consulta de Empresas",
+    description: "Visualizar el catálogo de empresas y razones sociales registradas.",
+    category: "Tesorería",
+  },
+  "treasury.companies.edit": {
+    title: "Edición de Empresas",
+    description: "Modificar código, razón social y RIF de empresas.",
+    category: "Tesorería",
+  },
+  "treasury.companies.status": {
+    title: "Estatus de Empresas",
+    description: "Activar y desactivar empresas en el sistema.",
+    category: "Tesorería",
+  },
+  "treasury.companies.manage": {
+    title: "Gestión Integral de Empresas",
+    description: "Crear, editar, activar y desactivar empresas del grupo.",
+    category: "Tesorería",
+  },
   "treasury.balances.view": {
     title: "Visualización de Saldos Diarios",
     description: "Consultar saldos operativos registrados en las cuentas y cierres diarios.",
@@ -216,7 +261,7 @@ interface UserModalFormData {
 interface UserModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.SubmitEvent<HTMLFormElement>) => void;
   isEdit?: boolean;
   formData: UserModalFormData;
   setFormData: React.Dispatch<React.SetStateAction<any>>;

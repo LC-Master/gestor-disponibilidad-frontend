@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Mail, ArrowRight, ArrowLeft, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { sanitizeErrorMessage } from "@/lib/fetchClient";
+import Image from "next/image";
 
 export default function ForgotPasswordPage() {
     const [email, setEmail] = useState("");
@@ -10,7 +12,7 @@ export default function ForgotPasswordPage() {
     const [errorMessage, setErrorMessage] = useState("");
     const [isSubmitted, setIsSubmitted] = useState(false);
 
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
         setErrorMessage("");
 
@@ -31,8 +33,8 @@ export default function ForgotPasswordPage() {
             if (!res.ok) {
                 const data = await res.json().catch(() => null);
                 const emailErr = data?.errors?.email;
-                const msg = (Array.isArray(emailErr) ? emailErr[0] : emailErr) || data?.message || "Ocurrió un error al procesar la solicitud.";
-                setErrorMessage(msg);
+                const rawMsg = (Array.isArray(emailErr) ? emailErr[0] : emailErr) || data?.message;
+                setErrorMessage(sanitizeErrorMessage(rawMsg, "Ocurrió un error al procesar la solicitud."));
                 return;
             }
 
@@ -48,7 +50,7 @@ export default function ForgotPasswordPage() {
         <div className="w-full max-w-md px-4 sm:px-0 py-8">
             <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-8 sm:p-10 shadow-xl shadow-neutral-950/5 dark:shadow-black/40">
                 <div className="flex flex-col items-center text-center mb-8">
-                    <img src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
+                    <Image src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
                     <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 mt-2">
                         Recuperar Contraseña
                     </h1>

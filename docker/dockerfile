@@ -1,0 +1,21 @@
+FROM oven/bun:1 AS builder
+WORKDIR /home/frontend
+
+COPY package.json bun.lock* ./
+COPY . .
+RUN bun install
+RUN bun run build
+FROM node:25.9.0-slim AS production
+RUN useradd -ms /bin/bash frontend
+WORKDIR /home/frontend
+
+COPY --chown=frontend:frontend --from=builder /home/frontend/.next/standalone ./
+COPY --chown=frontend:frontend --from=builder /home/frontend/.next/static ./.next/static
+COPY --chown=frontend:frontend --from=builder /home/frontend/public ./public
+
+RUN mkdir -p /home/frontend/storage/webp && \
+    chown -R frontend:frontend /home/frontend/storage
+
+USER frontend
+ENTRYPOINT ["node"]
+CMD ["server.js"]

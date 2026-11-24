@@ -16,7 +16,8 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { Company } from "@/app/(app)/tesoreria/types";
 import { CalendarDayAggregate, Supplier } from "../types";
 import { CreateInvoiceModal } from "./CreateInvoiceModal";
@@ -27,7 +28,15 @@ interface CxpCalendarViewProps {
 
 export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
 
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("ALL");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("cxp_selected_company_id");
+      if (saved && saved !== "ALL" && companies.some((c) => c.id === saved)) {
+        return saved;
+      }
+    }
+    return companies[0]?.id || "";
+  });
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [calendarData, setCalendarData] = useState<CalendarDayAggregate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -39,10 +48,17 @@ export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
   const month = currentDate.getMonth() + 1;
 
   useEffect(() => {
-    if (!selectedCompanyId) {
-      setSelectedCompanyId("ALL");
+    if (
+      companies.length > 0 &&
+      (!selectedCompanyId || selectedCompanyId === "ALL" || !companies.some((c) => c.id === selectedCompanyId))
+    ) {
+      const firstId = companies[0].id;
+      setSelectedCompanyId(firstId);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("cxp_selected_company_id", firstId);
+      }
     }
-  }, [selectedCompanyId]);
+  }, [companies, selectedCompanyId]);
 
   const loadSuppliers = async () => {
     try {
@@ -51,21 +67,23 @@ export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
         const data = await res.json();
         setSuppliers(Array.isArray(data) ? data : []);
       }
-    } catch (err) {
-      console.error(err);
-    }
+    } catch {}
   };
 
   const loadCalendar = async () => {
+    if (!selectedCompanyId || selectedCompanyId === "ALL") {
+      setCalendarData([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const companyParam = selectedCompanyId && selectedCompanyId !== "ALL" ? selectedCompanyId : "ALL";
-      const res = await fetchClient(`/api/cxp/calendar?company_id=${companyParam}&year=${year}&month=${month}`);
+      const res = await fetchClient(`/api/cxp/calendar?company_id=${selectedCompanyId}&year=${year}&month=${month}`);
       if (!res.ok) throw new Error("Error al consultar calendario de CXP");
       const data = await res.json();
       setCalendarData(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar calendario");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar calendario"));
     } finally {
       setLoading(false);
     }
@@ -210,21 +228,26 @@ export function CxpCalendarView({ companies }: CxpCalendarViewProps) {
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-neutral-400 hidden sm:block" />
-            <select
-              value={selectedCompanyId}
-              onChange={(e) => setSelectedCompanyId(e.target.value)}
-              className="px-3 py-2 text-xs font-semibold rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-locatel-medio cursor-pointer"
-            >
-              <option value="ALL">Todas las empresas</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <SearchableSelect
+            value={selectedCompanyId}
+            onChange={(val) => {
+              setSelectedCompanyId(val);
+              if (typeof window !== "undefined") {
+                localStorage.setItem("cxp_selected_company_id", val);
+              }
+            }}
+            icon={<Building2 className="w-4 h-4 text-neutral-400 shrink-0" />}
+            placeholder="Seleccionar empresa..."
+            searchPlaceholder="Buscar empresa por código, nombre o RIF..."
+            className="w-64"
+            buttonClassName="px-3 py-2 text-xs font-semibold rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100"
+            options={companies.map((c) => ({
+              value: c.id,
+              label: c.code ? `${c.code} · ${c.name}` : c.name,
+              sublabel: c.rif,
+              searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+            }))}
+          />
 
           <button
             onClick={() => setIsCreateInvoiceOpen(true)}

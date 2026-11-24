@@ -6,6 +6,7 @@ import { User, Mail, Lock, Eye, EyeOff, Loader2, ArrowRight, AlertCircle, Shield
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { registerSchema, type RegisterFormData, type ResponseRegisterError } from "@/schemas/auth";
+import Image from "next/image";
 
 interface RoleOption {
     name: string;
@@ -40,11 +41,9 @@ export default function RegisterPage() {
 
     useEffect(() => {
         const fetchRoles = async () => {
-            const fallbackRoles: RoleOption[] = [
+            const allowedAnalystRoles: RoleOption[] = [
                 { name: "ANALISTA_TESORERIA", display_name: "Analista de Tesorería" },
                 { name: "ANALISTA_CXP", display_name: "Analista de Cuentas por Pagar" },
-                { name: "COORD_TESORERIA", display_name: "Coordinador de Tesorería" },
-                { name: "COORD_CXP", display_name: "Coordinador de Cuentas por Pagar" },
             ];
 
             try {
@@ -52,22 +51,24 @@ export default function RegisterPage() {
                 if (res.ok) {
                     const data: RoleOption[] = await res.json();
                     if (Array.isArray(data) && data.length > 0) {
-                        // En registro público no se puede seleccionar ADMIN
-                        const filtered = data.filter((r) => !r.name.toUpperCase().includes("ADMIN"));
-                        const finalRoles = filtered.length > 0 ? filtered : fallbackRoles;
+                        const filtered = data.filter((r) => {
+                            const upper = r.name.toUpperCase().trim();
+                            return upper === "ANALISTA_TESORERIA" || upper === "ANALISTA_CXP";
+                        });
+                        const finalRoles = filtered.length > 0 ? filtered : allowedAnalystRoles;
                         setRoles(finalRoles);
                         setValue("role", finalRoles[0].name);
                     } else {
-                        setRoles(fallbackRoles);
-                        setValue("role", fallbackRoles[0].name);
+                        setRoles(allowedAnalystRoles);
+                        setValue("role", allowedAnalystRoles[0].name);
                     }
                 } else {
-                    setRoles(fallbackRoles);
-                    setValue("role", fallbackRoles[0].name);
+                    setRoles(allowedAnalystRoles);
+                    setValue("role", allowedAnalystRoles[0].name);
                 }
             } catch {
-                setRoles(fallbackRoles);
-                setValue("role", fallbackRoles[0].name);
+                setRoles(allowedAnalystRoles);
+                setValue("role", allowedAnalystRoles[0].name);
             } finally {
                 setLoadingRoles(false);
             }
@@ -135,17 +136,18 @@ export default function RegisterPage() {
                     return;
                 }
 
+                if (response.status >= 500) {
+                    setErrorMessage("Error interno en el servidor. Por favor, intente más tarde.");
+                    return;
+                }
+
                 setErrorMessage(errorData?.message || "Error al procesar la solicitud en el servidor.");
                 return;
             }
 
             window.location.href = "/login";
-        } catch (err: unknown) {
-            if (err instanceof Error) {
-                setErrorMessage(err.message);
-            } else {
-                setErrorMessage("Error de conexión con el servidor.");
-            }
+        } catch {
+            setErrorMessage("Error de conexión con el servidor. Verifique su conexión de red.");
         }
     };
 
@@ -153,7 +155,7 @@ export default function RegisterPage() {
         <div className="w-full max-w-md px-4 sm:px-0 py-8">
             <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-3xl p-8 sm:p-10 shadow-xl shadow-neutral-950/5 dark:shadow-black/40">
                 <div className="flex flex-col items-center text-center mb-8">
-                    <img src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
+                    <Image src="/Logo.webp" alt="Logo Locatel" width={250} height={250} />
                     <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 mt-2">
                         Crear Cuenta
                     </h1>

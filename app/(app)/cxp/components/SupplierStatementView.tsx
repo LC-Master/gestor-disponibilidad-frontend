@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchClient } from "@/lib/fetchClient";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { Company } from "@/app/(app)/tesoreria/types";
 import { SupplierStatement } from "../types";
 
@@ -46,8 +47,7 @@ export function SupplierStatementView({
       } else {
         toast.error("Error al cargar estado de cuenta del proveedor");
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
       toast.error("Error de conexión al cargar estado de cuenta");
     } finally {
       setLoading(false);
@@ -119,18 +119,23 @@ export function SupplierStatementView({
         </div>
 
         <div className="flex items-center gap-3">
-          <select
+          <SearchableSelect
             value={selectedCompanyId}
-            onChange={(e) => setSelectedCompanyId(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-semibold text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/20 cursor-pointer"
-          >
-            <option value="ALL">Todas las Empresas</option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={(val) => setSelectedCompanyId(val)}
+            placeholder="Todas las Empresas"
+            searchPlaceholder="Buscar empresa por código, nombre o RIF..."
+            className="w-64"
+            buttonClassName="px-3 py-2 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-semibold text-neutral-900 dark:text-neutral-100"
+            options={[
+              { value: "ALL", label: "Todas las Empresas" },
+              ...companies.map((c) => ({
+                value: c.id,
+                label: c.code ? `${c.code} · ${c.name}` : c.name,
+                sublabel: c.rif,
+                searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+              })),
+            ]}
+          />
         </div>
       </div>
 

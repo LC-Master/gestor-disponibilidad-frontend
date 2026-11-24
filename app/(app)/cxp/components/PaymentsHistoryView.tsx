@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import {
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   FileCheck2,
   FileText,
@@ -12,7 +14,9 @@ import {
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { ActionMenuPortal } from "@/components/ui/ActionMenuPortal";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { Bank, Company } from "@/app/(app)/tesoreria/types";
 import { Invoice, PaymentListItem } from "../types";
 import { PaymentReceiptModal } from "./PaymentReceiptModal";
@@ -27,11 +31,24 @@ interface PaymentsHistoryViewProps {
 function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) {
   const [activeTab, setActiveTab] = useState<"settlements" | "invoices">("settlements");
 
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("ALL");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => companies[0]?.id || "");
   const [selectedBankId, setSelectedBankId] = useState<string>("ALL");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [search, setSearch] = useState<string>("");
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [totalPages, setTotalPages] = useState<number>(1);
+
+  useEffect(() => {
+    if (
+      companies.length > 0 &&
+      (!selectedCompanyId || selectedCompanyId === "ALL" || !companies.some((c) => c.id === selectedCompanyId))
+    ) {
+      setSelectedCompanyId(companies[0].id);
+    }
+  }, [companies, selectedCompanyId]);
 
   const [payments, setPayments] = useState<PaymentListItem[]>([]);
   const [loadingPayments, setLoadingPayments] = useState<boolean>(true);
@@ -42,14 +59,22 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
   const [selectedInvoiceAudit, setSelectedInvoiceAudit] = useState<Invoice | null>(null);
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<Invoice | null>(null);
+  const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
 
   const fetchPayments = async () => {
+    if (!selectedCompanyId || selectedCompanyId === "ALL") {
+      setPayments([]);
+      setTotalRecords(0);
+      setTotalPages(1);
+      setLoadingPayments(false);
+      return;
+    }
     setLoadingPayments(true);
     try {
       const params = new URLSearchParams();
-      if (selectedCompanyId && selectedCompanyId !== "ALL") {
-        params.append("company_id", selectedCompanyId);
-      }
+      params.append("company_id", selectedCompanyId);
+      params.append("page", String(page));
+      params.append("page_size", String(pageSize));
       if (selectedBankId && selectedBankId !== "ALL") {
         params.append("bank_id", selectedBankId);
       }
@@ -67,23 +92,39 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
       if (!res.ok) {
         throw new Error("Error al obtener el historial de liquidaciones");
       }
-      const data = await res.json();
-      setPayments(Array.isArray(data) ? data : []);
+      const resData = await res.json();
+      if (Array.isArray(resData)) {
+        setPayments(resData);
+        setTotalRecords(resData.length);
+        setTotalPages(Math.max(1, Math.ceil(resData.length / pageSize)));
+      } else {
+        const items = Array.isArray(resData?.data) ? resData.data : [];
+        setPayments(items);
+        setTotalRecords(resData?.meta?.total_records ?? items.length);
+        setTotalPages(Math.max(1, resData?.meta?.total_pages ?? 1));
+      }
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar liquidaciones");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar liquidaciones"));
     } finally {
       setLoadingPayments(false);
     }
   };
 
   const fetchPaidInvoices = async () => {
+    if (!selectedCompanyId || selectedCompanyId === "ALL") {
+      setPaidInvoices([]);
+      setTotalRecords(0);
+      setTotalPages(1);
+      setLoadingInvoices(false);
+      return;
+    }
     setLoadingInvoices(true);
     try {
       const params = new URLSearchParams();
       params.append("scope", "paid");
-      if (selectedCompanyId && selectedCompanyId !== "ALL") {
-        params.append("company_id", selectedCompanyId);
-      }
+      params.append("company_id", selectedCompanyId);
+      params.append("page", String(page));
+      params.append("page_size", String(pageSize));
       if (dateFrom) {
         params.append("date_from", dateFrom);
       }
@@ -98,10 +139,19 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
       if (!res.ok) {
         throw new Error("Error al obtener las facturas pagadas");
       }
-      const data = await res.json();
-      setPaidInvoices(Array.isArray(data) ? data : []);
+      const resData = await res.json();
+      if (Array.isArray(resData)) {
+        setPaidInvoices(resData);
+        setTotalRecords(resData.length);
+        setTotalPages(Math.max(1, Math.ceil(resData.length / pageSize)));
+      } else {
+        const items = Array.isArray(resData?.data) ? resData.data : [];
+        setPaidInvoices(items);
+        setTotalRecords(resData?.meta?.total_records ?? items.length);
+        setTotalPages(Math.max(1, resData?.meta?.total_pages ?? 1));
+      }
     } catch (err: any) {
-      toast.error(err.message || "Error al cargar facturas pagadas");
+      toast.error(sanitizeErrorMessage(err, "Error al cargar facturas pagadas"));
     } finally {
       setLoadingInvoices(false);
     }
@@ -116,7 +166,7 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [activeTab, selectedCompanyId, selectedBankId, dateFrom, dateTo, search]);
+  }, [activeTab, selectedCompanyId, selectedBankId, dateFrom, dateTo, search, page, pageSize]);
 
   const formatMoney = (val: number, cur: string = "VES") => {
     return (
@@ -175,7 +225,10 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
         <div className="flex items-center gap-2 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-xl">
           <button
             type="button"
-            onClick={() => setActiveTab("settlements")}
+            onClick={() => {
+              setActiveTab("settlements");
+              setPage(1);
+            }}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === "settlements"
                 ? "bg-white dark:bg-neutral-900 text-emerald-700 dark:text-emerald-400 shadow-xs"
                 : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
@@ -186,7 +239,10 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("invoices")}
+            onClick={() => {
+              setActiveTab("invoices");
+              setPage(1);
+            }}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === "invoices"
                 ? "bg-white dark:bg-neutral-900 text-emerald-700 dark:text-emerald-400 shadow-xs"
                 : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200"
@@ -214,7 +270,10 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
               placeholder={
                 activeTab === "settlements"
                   ? "Buscar por N° Referencia bancaria..."
@@ -248,18 +307,22 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
             <label className="block text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 mb-1">
               Empresa
             </label>
-            <select
+            <SearchableSelect
               value={selectedCompanyId}
-              onChange={(e) => setSelectedCompanyId(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40 cursor-pointer"
-            >
-              <option value="ALL">Todas las Empresas</option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code ? `${c.code} - ${c.name}` : c.name}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => {
+                setSelectedCompanyId(val);
+                setPage(1);
+              }}
+              placeholder="Seleccionar empresa..."
+              searchPlaceholder="Buscar por código, nombre o RIF..."
+              buttonClassName="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-800 dark:text-neutral-200"
+              options={companies.map((c) => ({
+                value: c.id,
+                label: c.code ? `${c.code} - ${c.name}` : c.name,
+                sublabel: c.rif,
+                searchTerms: `${c.code || ""} ${c.name} ${c.rif || ""}`,
+              }))}
+            />
           </div>
 
           {activeTab === "settlements" ? (
@@ -267,18 +330,25 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
               <label className="block text-[11px] font-semibold text-neutral-500 dark:text-neutral-400 mb-1">
                 Banco Pagador
               </label>
-              <select
+              <SearchableSelect
                 value={selectedBankId}
-                onChange={(e) => setSelectedBankId(e.target.value)}
-                className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40 cursor-pointer"
-              >
-                <option value="ALL">Todos los Bancos</option>
-                {banks.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => {
+                  setSelectedBankId(val);
+                  setPage(1);
+                }}
+                placeholder="Todos los Bancos"
+                searchPlaceholder="Buscar banco por nombre o código..."
+                buttonClassName="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-800 dark:text-neutral-200"
+                options={[
+                  { value: "ALL", label: "Todos los Bancos" },
+                  ...banks.map((b) => ({
+                    value: b.id,
+                    label: b.name,
+                    sublabel: b.code,
+                    searchTerms: `${b.name} ${b.code || ""}`,
+                  })),
+                ]}
+              />
             </div>
           ) : (
             <div className="hidden sm:block" />
@@ -291,7 +361,10 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
             <input
               type="date"
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setPage(1);
+              }}
               className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40"
             />
           </div>
@@ -303,7 +376,10 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
             <input
               type="date"
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setPage(1);
+              }}
               className="w-full px-2.5 py-1.5 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700/80 rounded-xl text-xs text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/40"
             />
           </div>
@@ -311,9 +387,9 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
       </div>
 
       {activeTab === "settlements" ? (
-        <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400">
+        <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col min-h-[calc(100vh-16rem)]">
+          <div className="overflow-x-auto flex-1">
+            <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400 min-w-[920px]">
               <thead className="bg-neutral-50 dark:bg-neutral-800/60 text-neutral-700 dark:text-neutral-300 font-bold uppercase tracking-wider text-[11px] border-b border-neutral-200 dark:border-neutral-800 whitespace-nowrap">
                 <tr>
                   <th className="py-3 px-4">Fecha Pago</th>
@@ -323,7 +399,7 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
                   <th className="py-3 px-4 text-right">Monto Total</th>
                   <th className="py-3 px-4 text-center">Facturas</th>
                   <th className="py-3 px-4">Usuario</th>
-                  <th className="py-3 px-4 text-right">Acción</th>
+                  <th className="py-3 px-3 w-12 text-center uppercase tracking-wider">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800 whitespace-nowrap">
@@ -375,15 +451,24 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
                       <td className="py-3.5 px-4 text-neutral-500 dark:text-neutral-400 text-[11px]">
                         {p.created_by_name || "Sistema"}
                       </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPaymentId(p.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:text-emerald-400 text-xs font-semibold transition-colors cursor-pointer"
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <ActionMenuPortal
+                          isOpen={activeActionMenuId === p.id}
+                          onToggle={() => setActiveActionMenuId(activeActionMenuId === p.id ? null : p.id)}
+                          onClose={() => setActiveActionMenuId(null)}
                         >
-                          <FileText className="w-3.5 h-3.5" />
-                          <span>Ver Comprobante</span>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveActionMenuId(null);
+                              setSelectedPaymentId(p.id);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Ver Comprobante</span>
+                          </button>
+                        </ActionMenuPortal>
                       </td>
                     </tr>
                   ))
@@ -391,11 +476,53 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
               </tbody>
             </table>
           </div>
+          <div className="py-3 px-4 bg-neutral-50/50 dark:bg-neutral-800/40 border-t border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span>
+                Total: <strong className="font-mono text-neutral-800 dark:text-neutral-200">{totalRecords.toLocaleString("es-VE")}</strong> {totalRecords === 1 ? "liquidación" : "liquidaciones"}
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+              >
+                <option value={25}>25 / pág.</option>
+                <option value={50}>50 / pág.</option>
+                <option value={100}>100 / pág.</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs">
+                Página <strong className="text-neutral-800 dark:text-neutral-200">{page}</strong> de <strong className="text-neutral-800 dark:text-neutral-200">{Math.max(1, totalPages)}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || loadingPayments}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Anterior</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || loadingPayments}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <span>Siguiente</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
       ) : (
-        <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400">
+        <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col min-h-[calc(100vh-16rem)]">
+          <div className="overflow-x-auto flex-1">
+            <table className="w-full text-left text-xs text-neutral-600 dark:text-neutral-400 min-w-[920px]">
               <thead className="bg-neutral-50 dark:bg-neutral-800/60 text-neutral-700 dark:text-neutral-300 font-bold uppercase tracking-wider text-[11px] border-b border-neutral-200 dark:border-neutral-800 whitespace-nowrap">
                 <tr>
                   <th className="py-3 px-4">Empresa</th>
@@ -407,7 +534,7 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
                   <th className="py-3 px-4">F. Vencimiento</th>
                   <th className="py-3 px-4 text-right">Monto Factura</th>
                   <th className="py-3 px-4 text-center">Estatus</th>
-                  <th className="py-3 px-4 text-right">Acciones</th>
+                  <th className="py-3 px-3 w-12 text-center uppercase tracking-wider">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800 whitespace-nowrap">
@@ -466,31 +593,84 @@ function PaymentsHistoryContent({ companies, banks }: PaymentsHistoryViewProps) 
                           PAGADO
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
+                      <td className="py-3 px-3 text-center whitespace-nowrap">
+                        <ActionMenuPortal
+                          isOpen={activeActionMenuId === inv.id}
+                          onToggle={() => setActiveActionMenuId(activeActionMenuId === inv.id ? null : inv.id)}
+                          onClose={() => setActiveActionMenuId(null)}
+                        >
                           <button
                             type="button"
-                            onClick={() => setSelectedInvoiceAudit(inv)}
-                            className="p-1.5 rounded-lg text-teal-600 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition-colors cursor-pointer"
-                            title="Ver trazabilidad y auditoría"
+                            onClick={() => {
+                              setActiveActionMenuId(null);
+                              setSelectedInvoiceDetail(inv);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                           >
-                            <History className="w-4 h-4" />
+                            <Eye className="w-3.5 h-3.5 text-locatel-medio" />
+                            <span>Ver Detalle</span>
                           </button>
+
                           <button
                             type="button"
-                            onClick={() => setSelectedInvoiceDetail(inv)}
-                            className="p-1.5 rounded-lg text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
-                            title="Ver detalle del documento"
+                            onClick={() => {
+                              setActiveActionMenuId(null);
+                              setSelectedInvoiceAudit(inv);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                           >
-                            <Eye className="w-4 h-4" />
+                            <History className="w-3.5 h-3.5 text-teal-600" />
+                            <span>Trazabilidad</span>
                           </button>
-                        </div>
+                        </ActionMenuPortal>
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="py-3 px-4 bg-neutral-50/50 dark:bg-neutral-800/40 border-t border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span>
+                Total: <strong className="font-mono text-neutral-800 dark:text-neutral-200">{totalRecords.toLocaleString("es-VE")}</strong> {totalRecords === 1 ? "factura" : "facturas"}
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+              >
+                <option value={25}>25 / pág.</option>
+                <option value={50}>50 / pág.</option>
+                <option value={100}>100 / pág.</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs">
+                Página <strong className="text-neutral-800 dark:text-neutral-200">{page}</strong> de <strong className="text-neutral-800 dark:text-neutral-200">{Math.max(1, totalPages)}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || loadingInvoices}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Anterior</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || loadingInvoices}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <span>Siguiente</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       )}

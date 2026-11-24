@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Users,
   UserPlus,
   Edit,
   Shield,
@@ -10,18 +9,14 @@ import {
   Search,
   RefreshCw,
   User,
-  X,
-  Power,
   Key,
-  Check,
-  Layers,
-  AlertCircle,
-  Eye,
-  EyeOff,
   Lock,
+  ChevronLeft,
+  ChevronRight,
+  Power,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
 import { PermissionDetail, RoleDetail, UserProfile, UserWithRoles } from "../types";
 import { UserModal, getFriendlyPermission } from "./UserModal";
 
@@ -38,11 +33,14 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(15);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [totalPages, setTotalPages] = useState<number>(1);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserWithRoles | null>(null);
-  const [showPassword, setShowPassword] = useState(false);
 
   const rolesList = useMemo(() => {
     return (currentUser?.roles || []).map((r) => r.toUpperCase().trim());
@@ -93,6 +91,14 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
       "core.accounts.manage",
       "treasury.accounts.view",
       "treasury.accounts.manage",
+      "treasury.banks.view",
+      "treasury.banks.edit",
+      "treasury.banks.status",
+      "treasury.banks.manage",
+      "treasury.companies.view",
+      "treasury.companies.edit",
+      "treasury.companies.status",
+      "treasury.companies.manage",
       "treasury.balances.view",
       "treasury.balances.record",
       "treasury.balances.edit",
@@ -127,6 +133,15 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
       "core.accounts.manage",
       "treasury.accounts.view",
       "treasury.accounts.manage",
+      "treasury.accounts.status",
+      "treasury.banks.view",
+      "treasury.banks.edit",
+      "treasury.banks.status",
+      "treasury.banks.manage",
+      "treasury.companies.view",
+      "treasury.companies.edit",
+      "treasury.companies.status",
+      "treasury.companies.manage",
       "treasury.balances.view",
       "treasury.balances.edit",
       "treasury.balances.record",
@@ -135,6 +150,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
       "treasury.availability.edit",
       "treasury.availability.approve",
       "treasury.history.view",
+      "cxp.payments.execute",
       "reports.treasury.view",
       "reports.dashboard.view",
     ],
@@ -217,22 +233,12 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const loadData = async () => {
+  const loadMetadata = async () => {
     try {
-      const [usersRes, rolesRes, permsRes] = await Promise.all([
-        fetchClient("/api/v1/users"),
+      const [rolesRes, permsRes] = await Promise.all([
         fetchClient("/api/v1/roles").catch(() => fetchClient("/api/roles")),
         fetchClient("/api/v1/permissions").catch(() => fetchClient("/api/permissions")),
       ]);
-
-      if (usersRes.ok) {
-        const data = await usersRes.json();
-        setUsers(Array.isArray(data) ? data : []);
-      } else if (usersRes.status === 403) {
-        const errJson = await usersRes.json().catch(() => null);
-        toast.error(errJson?.message || "No tiene autorización para gestionar usuarios fuera de su departamento");
-        setUsers([]);
-      }
 
       if (rolesRes && rolesRes.ok) {
         const rolesData = await rolesRes.json();
@@ -253,6 +259,46 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
         }
       }
     } catch {
+    }
+  };
+
+  const loadData = async () => {
+    try {
+      const params = new URLSearchParams();
+      params.append("page", String(page));
+      params.append("page_size", String(pageSize));
+      if (searchQuery.trim()) {
+        params.append("search", searchQuery.trim());
+      }
+      if (roleFilter !== "all") {
+        params.append("role", roleFilter);
+      }
+      if (statusFilter !== "all") {
+        params.append("status", statusFilter);
+      }
+
+      const usersRes = await fetchClient(`/api/v1/users?${params.toString()}`);
+
+      if (usersRes.ok) {
+        const resData = await usersRes.json();
+        if (Array.isArray(resData)) {
+          setUsers(resData);
+          setTotalRecords(resData.length);
+          setTotalPages(Math.max(1, Math.ceil(resData.length / pageSize)));
+        } else {
+          const items = Array.isArray(resData?.data) ? resData.data : [];
+          setUsers(items);
+          setTotalRecords(resData?.meta?.total_records ?? items.length);
+          setTotalPages(Math.max(1, resData?.meta?.total_pages ?? 1));
+        }
+      } else if (usersRes.status === 403) {
+        const errJson = await usersRes.json().catch(() => null);
+        toast.error(sanitizeErrorMessage(errJson?.message, "No tiene autorización para gestionar usuarios fuera de su departamento"));
+        setUsers([]);
+        setTotalRecords(0);
+        setTotalPages(1);
+      }
+    } catch {
       toast.error("Error al sincronizar datos de usuarios");
     } finally {
       setLoading(false);
@@ -261,59 +307,23 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
   };
 
   useEffect(() => {
-    loadData();
+    loadMetadata();
   }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadData();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [page, pageSize, searchQuery, statusFilter, roleFilter]);
 
   const handleRefresh = () => {
     setRefreshing(true);
     loadData();
   };
 
-  const filteredUsers = useMemo(() => {
-    return users.filter((u) => {
-      const fullText = `${u.name} ${u.last_name} ${u.email}`.toLowerCase();
-      if (searchQuery.trim() && !fullText.includes(searchQuery.toLowerCase().trim())) {
-        return false;
-      }
-      if (statusFilter === "active" && !u.is_active) return false;
-      if (statusFilter === "inactive" && u.is_active) return false;
-      if (roleFilter !== "all") {
-        const hasRole = (u.roles || []).some(
-          (r) => r.toUpperCase() === roleFilter.toUpperCase()
-        );
-        if (!hasRole) return false;
-      }
-      return true;
-    });
-  }, [users, searchQuery, statusFilter, roleFilter]);
-
-  const permissionsByModule = useMemo(() => {
-    const map = new Map<string, PermissionDetail[]>();
-    availablePermissions.forEach((p) => {
-      const prefix = (p.code || "").split(".")[0]?.toLowerCase().trim();
-      let moduleName = "Otros Permisos";
-      if (prefix === "treasury") {
-        moduleName = "Tesorería";
-      } else if (prefix === "cxp") {
-        moduleName = "Cuentas por Pagar";
-      } else if (prefix === "users" || prefix === "roles") {
-        moduleName = "Administración / Seguridad";
-      } else if (p.module) {
-        moduleName = p.module;
-      } else if (prefix) {
-        moduleName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-      }
-      const list = map.get(moduleName) || [];
-      list.push({
-        code: p.code,
-        name: p.name || p.code,
-        description: p.description || p.code,
-        module: moduleName,
-      });
-      map.set(moduleName, list);
-    });
-    return map;
-  }, [availablePermissions]);
+  const filteredUsers = users;
+  const paginatedUsers = users;
 
   const handleToggleStatus = async (user: UserWithRoles) => {
     const isTargetAdmin = (user.roles || []).some(
@@ -339,7 +349,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
         prev.map((u) => (u.id === user.id ? { ...u, is_active: data.is_active } : u))
       );
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al cambiar estado");
+      toast.error(sanitizeErrorMessage(err, "Error al cambiar estado"));
     }
   };
 
@@ -365,7 +375,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
     setIsEditOpen(true);
   };
 
-  const handleCreateSubmit = async (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!createForm.name || !createForm.lastName || !createForm.email || !createForm.password) {
       toast.error("Complete todos los campos obligatorios");
@@ -412,13 +422,13 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
       });
       await loadData();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al registrar usuario");
+      toast.error(sanitizeErrorMessage(err, "Error al registrar usuario"));
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleEditSubmit = async (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedUser) return;
 
@@ -458,7 +468,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
       setIsEditOpen(false);
       await loadData();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al actualizar");
+      toast.error(sanitizeErrorMessage(err, "Error al actualizar"));
     } finally {
       setIsSubmitting(false);
     }
@@ -617,7 +627,10 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
               type="text"
               placeholder="Buscar por nombre o correo corporativo..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
               className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30"
             />
           </div>
@@ -625,7 +638,10 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
           <div>
             <select
               value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
+              onChange={(e) => {
+                setRoleFilter(e.target.value);
+                setPage(1);
+              }}
               className="w-full px-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
             >
               <option value="all">Filtrar por Rol: Todos</option>
@@ -640,7 +656,10 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
           <div>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
               className="w-full px-3 py-2 text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-locatel-medio/30 cursor-pointer"
             >
               <option value="all">Filtrar por Estado: Todos</option>
@@ -684,14 +703,14 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs overflow-hidden">
+      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col min-h-[calc(100vh-16rem)]">
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 text-neutral-400">
+          <div className="flex flex-col items-center justify-center py-16 text-neutral-400 flex-1">
             <RefreshCw className="w-8 h-8 animate-spin text-locatel-medio mb-3" />
             <span className="text-xs font-semibold">Cargando directorio de usuarios y permisos...</span>
           </div>
         ) : (
-          <div className="overflow-x-auto custom-scrollbar">
+          <div className="overflow-x-auto custom-scrollbar flex-1">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-neutral-200 dark:border-neutral-700 bg-neutral-50/80 dark:bg-neutral-800/60">
@@ -726,7 +745,7 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                     </td>
                   </tr>
                 ) : (
-                  filteredUsers.map((u) => {
+                  paginatedUsers.map((u) => {
                     const permCount = u.permissions?.length || 0;
                     const isRowAdmin = (u.roles || []).some(
                       (r) => r.toUpperCase() === "ADMIN" || r.toUpperCase() === "ADMINISTRADOR"
@@ -837,6 +856,48 @@ export function UserManagementTable({ currentUser }: UserManagementTableProps) {
                 )}
               </tbody>
             </table>
+            <div className="px-4 py-3 border-t border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3 text-neutral-500 dark:text-neutral-400">
+                <span>
+                  Total: <strong className="text-neutral-800 dark:text-neutral-200 font-mono">{totalRecords.toLocaleString("es-VE")}</strong> registros
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="px-2 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-700 dark:text-neutral-300 focus:outline-none cursor-pointer"
+                >
+                  <option value={15}>15 / pág</option>
+                  <option value={25}>25 / pág</option>
+                  <option value={50}>50 / pág</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1 || loading}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Anterior</span>
+                </button>
+                <span className="font-mono text-neutral-600 dark:text-neutral-300 px-2">
+                  Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || loading}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                >
+                  <span>Siguiente</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

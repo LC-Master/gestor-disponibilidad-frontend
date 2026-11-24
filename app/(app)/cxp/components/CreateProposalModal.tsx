@@ -12,9 +12,11 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchClient } from "@/lib/fetchClient";
+import { fetchClient, sanitizeErrorMessage } from "@/lib/fetchClient";
+import { getCurrentRates } from "@/lib/exchangeRates";
+import { getInvoiceVESAmount } from "@/lib/invoiceTotals";
 import { Company } from "@/app/(app)/tesoreria/types";
-import { CxpAvailability, Invoice } from "../types";
+import { CurrentRatesResponse, CxpAvailability, Invoice } from "../types";
 
 interface InvoiceAdjustmentItem {
   id: string;
@@ -50,6 +52,7 @@ export function CreateProposalModal({
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [availability, setAvailability] = useState<CxpAvailability | null>(null);
+  const [rates, setRates] = useState<CurrentRatesResponse | null>(null);
   const [_, setLoadingAvailability] = useState(false);
   const [adjustments, setAdjustments] = useState<Record<string, InvoiceAdjustmentItem[]>>({});
   const [expandedInvoiceIds, setExpandedInvoiceIds] = useState<Set<string>>(new Set());
@@ -58,12 +61,26 @@ export function CreateProposalModal({
     if (selectedCompanyId && selectedCompanyId !== "ALL") {
       return selectedCompanyId;
     }
-    return selectedInvoices[0]?.company_id || "";
-  }, [selectedCompanyId, selectedInvoices]);
+    return companies[0]?.id || "";
+  }, [selectedCompanyId, companies]);
+
+  const companyInvoices = useMemo(() => {
+    if (!targetCompanyId) return [];
+    return selectedInvoices.filter((inv) => inv.company_id === targetCompanyId);
+  }, [selectedInvoices, targetCompanyId]);
 
   const company = useMemo(() => {
     return companies.find((c) => c.id === targetCompanyId);
   }, [companies, targetCompanyId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    getCurrentRates()
+      .then((data) => {
+        if (data) setRates(data);
+      })
+      .catch(() => { });
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || !targetCompanyId) return;
@@ -94,12 +111,25 @@ export function CreateProposalModal({
     };
   }, [isOpen, targetCompanyId, executionDate]);
 
+  const bcvUsdRate = rates?.dolar?.Valor || 0;
+  const bcvEurRate = rates?.euro?.Valor || 0;
+
   const effectiveRate = useMemo(() => {
+    if (availability && availability.exchange_rate > 1) {
+      return availability.exchange_rate;
+    }
+    if (bcvUsdRate > 0) {
+      return bcvUsdRate;
+    }
     if (availability && availability.exchange_rate > 0) {
       return availability.exchange_rate;
     }
     return exchangeRate > 0 ? exchangeRate : 1.0;
-  }, [availability, exchangeRate]);
+  }, [availability, exchangeRate, bcvUsdRate]);
+
+  const effectiveEurRate = useMemo(() => {
+    return bcvEurRate > 0 ? bcvEurRate : 0;
+  }, [bcvEurRate]);
 
   const formatMoney = (val: number, cur: string = "VES") => {
     return (
@@ -170,8 +200,9 @@ export function CreateProposalModal({
   };
 
   const calculatedInvoices = useMemo(() => {
-    return selectedInvoices.map((inv) => {
+    return companyInvoices.map((inv) => {
       const baseRemaining = Math.max(0, inv.total_amount - (inv.paid_amount || 0));
+      const curr = (inv.currency || "VES").toUpperCase().trim();
       const invoiceAdjs = adjustments[inv.id] || [];
 
       let debitSum = 0;
@@ -187,31 +218,34 @@ export function CreateProposalModal({
       });
 
       const finalAmount = Math.max(0, baseRemaining + debitSum - creditSum);
+      const indexedBaseVES = getInvoiceVESAmount(inv, effectiveRate, effectiveEurRate);
 
       let amountVES = 0;
       let amountUSD = 0;
-      const usdBase =
-        inv.total_amount_usd ||
-        (inv.currency === "USD"
-          ? inv.total_amount
-          : inv.exchange_rate > 0
-            ? inv.total_amount / inv.exchange_rate
-            : 0);
-      const indexedBaseVES = usdBase * effectiveRate;
-      const originalEmissionVES =
-        inv.currency === "VES"
-          ? inv.total_amount
-          : inv.total_amount * (inv.exchange_rate || 1);
+      let amountEUR = 0;
 
       if (inv.is_indexed) {
-        amountUSD = usdBase;
         amountVES = Math.max(0, indexedBaseVES + debitSum - creditSum);
-      } else if (inv.currency === "VES") {
+        amountUSD = effectiveRate > 0 ? amountVES / effectiveRate : 0;
+        amountEUR = effectiveEurRate > 0 ? amountVES / effectiveEurRate : 0;
+      } else if (curr === "VES") {
         amountVES = finalAmount;
-        amountUSD = effectiveRate > 0 ? finalAmount / effectiveRate : finalAmount;
+        amountUSD = effectiveRate > 0 ? amountVES / effectiveRate : 0;
+        amountEUR = effectiveEurRate > 0 ? amountVES / effectiveEurRate : 0;
+      } else if (curr === "EUR") {
+        amountEUR = finalAmount;
+        const rate =
+          effectiveEurRate > 0
+            ? effectiveEurRate
+            : inv.exchange_rate > 0
+              ? inv.exchange_rate
+              : effectiveRate;
+        amountVES = finalAmount * rate;
+        amountUSD = effectiveRate > 0 ? amountVES / effectiveRate : 0;
       } else {
         amountUSD = finalAmount;
         amountVES = finalAmount * effectiveRate;
+        amountEUR = effectiveEurRate > 0 ? amountVES / effectiveEurRate : 0;
       }
 
       return {
@@ -222,38 +256,49 @@ export function CreateProposalModal({
         finalAmount,
         amountVES,
         amountUSD,
+        amountEUR,
         indexedBaseVES,
-        originalEmissionVES,
         adjustments: invoiceAdjs,
       };
     });
-  }, [selectedInvoices, adjustments, effectiveRate]);
+  }, [companyInvoices, adjustments, effectiveRate, effectiveEurRate]);
 
   const totalPropuestaVES = useMemo(() => {
     return calculatedInvoices.reduce((sum, item) => sum + item.amountVES, 0);
   }, [calculatedInvoices]);
 
   const totalPropuestaUSD = useMemo(() => {
-    return calculatedInvoices.reduce((sum, item) => sum + item.amountUSD, 0);
-  }, [calculatedInvoices]);
+    return effectiveRate > 0
+      ? totalPropuestaVES / effectiveRate
+      : calculatedInvoices.reduce((sum, item) => sum + item.amountUSD, 0);
+  }, [totalPropuestaVES, effectiveRate, calculatedInvoices]);
+
+  const totalPropuestaEUR = useMemo(() => {
+    return effectiveEurRate > 0
+      ? totalPropuestaVES / effectiveEurRate
+      : calculatedInvoices.reduce((sum, item) => sum + item.amountEUR, 0);
+  }, [totalPropuestaVES, effectiveEurRate, calculatedInvoices]);
 
   const supplierQuota = useMemo(() => {
-    return Math.max(0, availability?.supplier_amount ?? 0);
-  }, [availability]);
+    if (!availability || availability.company_id !== targetCompanyId) return 0;
+    return Math.max(0, availability.supplier_amount ?? 0);
+  }, [availability, targetCompanyId]);
 
   const consumedQuota = useMemo(() => {
-    return Math.max(0, availability?.cupo_consumido ?? 0);
-  }, [availability]);
+    if (!availability || availability.company_id !== targetCompanyId) return 0;
+    return Math.max(0, availability.cupo_consumido ?? 0);
+  }, [availability, targetCompanyId]);
 
   const freeQuota = useMemo(() => {
-    return Math.max(0, availability?.cupo_libre ?? supplierQuota - consumedQuota);
-  }, [availability, supplierQuota, consumedQuota]);
+    if (!availability || availability.company_id !== targetCompanyId) return 0;
+    return Math.max(0, availability.cupo_libre ?? supplierQuota - consumedQuota);
+  }, [availability, targetCompanyId, supplierQuota, consumedQuota]);
 
   const remainingQuota = freeQuota - totalPropuestaVES;
   const isOverQuota = totalPropuestaVES > freeQuota || freeQuota <= 0;
-  const hasNoApprovedAvailability = !availability?.has_approved_today;
+  const hasNoApprovedAvailability = !availability?.has_approved_today || availability?.company_id !== targetCompanyId;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (!targetCompanyId) {
@@ -264,7 +309,11 @@ export function CreateProposalModal({
       toast.error("Debe indicar la fecha estimada de ejecución.");
       return;
     }
-    if (selectedInvoices.length === 0) {
+    if (selectedInvoices.some((inv) => inv.company_id !== targetCompanyId)) {
+      toast.error("No se permite mezclar facturas de distintas empresas en una propuesta.");
+      return;
+    }
+    if (companyInvoices.length === 0) {
       toast.error("Debe seleccionar al menos una factura.");
       return;
     }
@@ -315,7 +364,7 @@ export function CreateProposalModal({
           daily_availability_id: (availability as any)?.id,
           execution_date: executionDate,
           notes: notes.trim(),
-          invoice_ids: selectedInvoices.map((inv) => inv.id),
+          invoice_ids: companyInvoices.map((inv) => inv.id),
           adjustments: payloadAdjustments,
         }),
       });
@@ -329,7 +378,7 @@ export function CreateProposalModal({
       onSuccess();
       onClose();
     } catch (err: any) {
-      toast.error(err.message || "Error al procesar la propuesta de pago");
+      toast.error(sanitizeErrorMessage(err, "Error al procesar la propuesta de pago"));
     } finally {
       setIsSubmitting(false);
     }
@@ -425,6 +474,7 @@ export function CreateProposalModal({
                 </span>
                 <span className="font-mono tabular-nums text-[10px] text-neutral-500 block mt-0.5">
                   ≈ {formatMoney(totalPropuestaUSD, "USD")}
+                  {totalPropuestaEUR > 0 && ` | ${formatMoney(totalPropuestaEUR, "EUR")}`}
                 </span>
               </div>
 
@@ -544,7 +594,7 @@ export function CreateProposalModal({
                                       {formatMoney(item.indexedBaseVES, "VES")}
                                     </div>
                                     <div className="text-[10px] text-neutral-400">
-                                      Ref: {formatMoney(item.originalEmissionVES, "VES")}
+                                      Orig: {formatMoney(inv.total_amount, inv.currency)}
                                     </div>
                                   </div>
                                 ) : (
@@ -574,7 +624,12 @@ export function CreateProposalModal({
 
                               <div className="w-[20%] text-right font-mono tabular-nums font-semibold text-xs text-neutral-900 dark:text-neutral-100">
                                 <div>{formatMoney(item.amountVES, "VES")}</div>
-                                {inv.is_indexed && (
+                                {inv.currency !== "VES" && (
+                                  <div className="text-[10px] font-normal text-neutral-400 font-mono tabular-nums">
+                                    ≈ {formatMoney(inv.currency === "EUR" ? item.amountEUR : item.amountUSD, inv.currency)}
+                                  </div>
+                                )}
+                                {inv.currency === "VES" && inv.is_indexed && (
                                   <div className="text-[10px] font-normal text-neutral-400 font-mono tabular-nums">
                                     ≈ {formatMoney(item.amountUSD, "USD")}
                                   </div>
